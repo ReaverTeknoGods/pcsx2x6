@@ -10,6 +10,8 @@
 /// TODO: ACSRAM should be saved like PS2 NVRAM!!
 /// TODO: ACSRAM should be per-game. keep it per-emulator for the duration of the early development stage
 
+#define OOB_REPORT(T) Console.Error("ACSRAM: out of bound %s: %08X\n", __FUNCTION__, T);
+
 u8 ACSRAM::SRAMBUF[NamcoMemSize::ACSRAM];
 
 
@@ -31,7 +33,7 @@ u8 ACSRAM::Read8(u32 addr) {
     u32 T = addr - ACSRAM_ADDR_BASE_IOP_POV;
     if (T < ACSRAM_MAX_SIZE) {
         return ACSRAM::SRAMBUF[T];
-    }
+    } else OOB_REPORT(T);
     return 0;
 }
 
@@ -40,7 +42,7 @@ u16 ACSRAM::Read16(u32 addr) {
     if (T < ACSRAM_MAX_SIZE) {
         u16* A = (u16*)&ACSRAM::SRAMBUF[T];
         return *A;
-    }
+    } else OOB_REPORT(T);
     return 0;
 }
 
@@ -49,7 +51,7 @@ u32 ACSRAM::Read32(u32 addr) {
     if (T < ACSRAM_MAX_SIZE) {
         u32* A = (u32*)&ACSRAM::SRAMBUF[T];
         return *A;
-    }
+    } else OOB_REPORT(T);
     return 0;
 }
 
@@ -58,7 +60,7 @@ void ACSRAM::Write8(u32 addr, u8 val) {
     u32 T = addr - ACSRAM_ADDR_BASE_IOP_POV;
     if (T < ACSRAM_MAX_SIZE) {
         ACSRAM::SRAMBUF[T] = val;
-    }
+    } else OOB_REPORT(T);
 }
 
 void ACSRAM::Write16(u32 addr, u16 val) {
@@ -66,7 +68,7 @@ void ACSRAM::Write16(u32 addr, u16 val) {
     if (T < ACSRAM_MAX_SIZE) {
         u16* A = (u16*)&ACSRAM::SRAMBUF[T];
         *A = val;
-    }
+    } else OOB_REPORT(T);
 }
 
  void ACSRAM::Write32(u32 addr, u32 val) {
@@ -74,5 +76,5 @@ void ACSRAM::Write16(u32 addr, u16 val) {
     if (T < ACSRAM_MAX_SIZE) {
         u32* A = (u32*)&ACSRAM::SRAMBUF[T];
         *A = val;
-    }
+    } else OOB_REPORT(T);
 }

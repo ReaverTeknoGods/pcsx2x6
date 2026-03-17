@@ -6,6 +6,7 @@
 #include <string>
 
 #define ACSRAM_ADDR_BASE 0xB2500000
+#define ACSRAM_RANGE 0x1250
 #define ACSRAM_ADDR_BASE_IOP_POV 0x12500000
 #define ACSRAM_MAX_SIZE _32kb
 
