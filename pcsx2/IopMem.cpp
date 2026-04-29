@@ -392,8 +392,8 @@ void iopMemWrite16(u32 mem, u16 value)
 		default: Console.Error("%-16s %08X = %04X", "ACUNK::write16", mem, value); break;
 		}
 	} else if ((t & 0xFF00) == 0x1300) {
-		if (mem == ACCORE_INTR_ATA)  Console.Warning("ACCORE_ACATA_INTR_STOP: %04X", value);
-		if (mem == ACCORE_INTR_UART) Console.Warning("ACCORE_ACUART_INTR_STOP: %04X", value);
+		if (mem == ACCORE_INTR_ATA)  Console.Warning("ACCORE:  ACATA_INTR_CLEAR: %04X", value);
+		if (mem == ACCORE_INTR_UART) Console.Warning("ACCORE: ACUART_INTR_CLEAR: %04X", value);
 	} else
 	{
 		u8* p = (u8 *)(psxMemWLUT[mem >> 16]);
