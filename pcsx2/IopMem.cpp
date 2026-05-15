@@ -244,9 +244,6 @@ u32 iopMemRead32(u32 mem)
 			default:
 				return psxHu32(mem);
 		}
-	} else if ((t & 0xFF00) == ACATA_RANGE) {
-		Console.Error("%-16s %08X:  %08X", "ACATA::Read32", mem, ACATA::REGS[mem]);
-		return ACATA::REGS[mem];
 	} else
 	{
 		//see also Hw.c
