@@ -43,6 +43,12 @@ void ACCORE::Write16(u32 mem, u16 value) {
 		//case 0x1241603A: break;
 		//case 0x12417000: break;
 		//case 0x1241601E: break;
+		case ACCORE_FPGA_BEGIN_PROGRAM:
+			INTR_REG |= (0x1000|0x2000);
+			break;
+		case ACCPRE_FPGA_FINISH_PROGRAM:
+			CLRB(INTR_REG, (0x1000|0x2000)); // we clear it to speed up boot times: ACRAM waits 0xFFFFF times for 0x1000 flags to be cleared
+			break;
 
 		default: Console.Error("%-16s %08X = %04X", "ACUNK::write16", mem, value); break;
 		}
