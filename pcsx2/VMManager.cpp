@@ -1281,40 +1281,40 @@ bool VMManager::AutoDetectSource(const std::string& filename, Error* error)
 				Console.Error("cannot read arcade game config '%s'", filename.c_str());
 				return false;
 			} else {
+				Console.WriteLn(Color_Green, "# ARCADE GAME CONFIG FILE DETECTED");
 				std::string basedir = Path::ToNativePath(Path::GetDirectory(filename))+FS_OSPATH_SEPARATOR_CHARACTER;
 				std::string subdir = INI.GetStringValue("data", "subdir");
 				if (subdir != "") basedir = Path::AppendDirectory(basedir, subdir);
-				Console.WriteLnFmt("basedir:'{}'", basedir);
+				Console.WriteLnFmt(Color_Green, "ACGAME: basedir:'{}'", basedir);
 				std::string s_acmedia, s_imgname, s_serial;
-				Console.WriteLn("# ARCADE GAME CONFIG FILE DETECTED");
 				s_acmedia = INI.GetStringValue("data", "media");
 				s_imgname = INI.GetStringValue("data", "mediasrc");
 				s_serial  = INI.GetStringValue("game", "gameid");
 
-				std::string cards[2];
-				std::string carda[2] = {"dongle", "card"};
-				bool reopen_cards = false;
-				for (int x = 0; x < 2; x++)
-				{
-					if ((cards[x] = INI.GetStringValue("data", carda[x].c_str())) != "") {
-						int indx = FileMcd_ConvertToSlot(x, 0);
-						Console.WriteLnFmt("ARCADE: setting {} to: '{}'", carda[x], cards[x]);
-						EmuConfig.Mcd[indx].Filename = cards[x];
-						EmuConfig.Mcd[indx].Enabled  = true;
-						AutoEject::Set(x, 0);
-						reopen_cards = true;
-					}
+				std::string card;
+				if ((card = INI.GetStringValue("data", "dongle", "")) != "") {
+					Host::SetBaseStringSettingValue("MemoryCards", "Slot1_Filename", card.c_str());
 				}
-				if (reopen_cards) FileMcd_Reopen(s_serial);
+				if ((card = INI.GetStringValue("data", "card", "")) != "") {
+					Host::SetBaseStringSettingValue("MemoryCards", "Slot2_Filename", card.c_str());
+				}
+				/// TODOx6: Decide if we want to lock mc1 access if .ACGAME does not ask for it
+				//   Only SoulCalibur2 uses it, with the conquest card. yet many games bring a DONGLEMAN that can still access both ports
+				//   It SHOULD not be possible: but What if A game with the appropiate dongleman driver damages a conquest card?
+				// ---> else Host::SetBaseBoolSettingValue("MemoryCards", "Slot2_Enable", false);
 
+				//FileMcd_Reopen(s_serial);
 				s_elf_override = Path::Combine(basedir, INI.GetStringValue("data", "elf"));
-				ACSRAM::filepath = Path::Combine(basedir, INI.GetStringValue("data", "sram", "acsram.bin"));
+				ACSRAM::filepath = Path::Combine(basedir, INI.GetStringValue("data", "sram", "sram.bin"));
 				ACATA::SetEnv(basedir, s_imgname, s_acmedia);
 				int R;
 				if ((R = ACATA::TH::IO_OpenImage())!=0) {
 					Error::SetString(error, std::string("cannot open arcade media image"));
 					return false;
 				}
+				Console.WriteLnFmt(Color_Green, "ACGAME: elf:'{}'", s_elf_override);
+				Console.WriteLnFmt(Color_Green, "ACGAME: sram:'{}'", ACSRAM::filepath);
+				Console.WriteLnFmt(Color_Green, "ACGAME: media:'{}'", ACATA::imgpath);
 				
 				return true;
 			}

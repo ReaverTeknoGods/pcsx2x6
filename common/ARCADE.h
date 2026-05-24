@@ -19,3 +19,13 @@ enum ACMEDIATYPE {
     (s) == "DVD" ? ACMEDIATYPE::ACDVD : \
     (s) == "HDD" ? ACMEDIATYPE::ACHDD : \
     ACMEDIATYPE::ACUNK)
+
+    
+
+struct ArcadeBootParams {
+	std::string cards[2];
+	std::string mediapath;
+	std::string elf_path;
+	std::string sram_path;
+	ACMEDIATYPE MediaType;
+};

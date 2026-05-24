@@ -251,8 +251,34 @@ void GameList::FillBootParametersForEntry(VMBootParameters* params, const Entry*
 	}
 	else if (entry->type == GameList::EntryType::ARCADE) {
 		params->filename = entry->path;
-		params->source_type = CDVD_SourceType::NoDisc;
-		params->elf_override = entry->path;
+		//params->source_type = CDVD_SourceType::NoDisc;
+		
+		INISettingsInterface INI(entry->path);
+		if (INI.Load()){
+			ArcadeBootParams P;
+			std::string card, basedir, subdir;
+
+			basedir = Path::ToNativePath(Path::GetDirectory(entry->path))+FS_OSPATH_SEPARATOR_CHARACTER;
+			subdir = INI.GetStringValue("data", "subdir");
+			if (subdir != "") basedir = Path::AppendDirectory(basedir, subdir);
+			P.cards[0] = INI.GetStringValue("data", "dongle");
+			P.cards[1] = INI.GetStringValue("data", "card");
+			P.mediapath = INI.GetStringValue("data", "mediasrc");
+			P.MediaType = ACMEDIATYPE_FROM_STRING(INI.GetStringValue("data", "media"));
+			params->elf_override = Path::Combine(basedir, INI.GetStringValue("data", "elf"));
+			P.sram_path = Path::Combine(basedir, INI.GetStringValue("data", "sram", "sram.bin"));
+			params->arcade = P;
+			/*if ((card = INI.GetStringValue("data", "dongle", "")) != "") {
+				Host::SetBaseStringSettingValue("MemoryCards", "Slot1_Filename", card.c_str());
+				Console.WriteLnFmt("ARCADE: setting dongle to: '{}'", card);
+			}
+			if ((card = INI.GetStringValue("data", "card", "")) != "") {
+				Host::SetBaseStringSettingValue("MemoryCards", "Slot2_Filename", card.c_str());
+				Console.WriteLnFmt("ARCADE: setting card   to: '{}'", card);
+			}*/
+		} else {
+			Console.Error("cannot read arcade game config '%s'", entry->path);
+		}
 	}
 	else
 	{
@@ -296,19 +322,15 @@ bool GameList::GetAcConfListEntry(const std::string& filename, GameList::Entry* 
 		std::string s_acmedia, s_imgname;
 			
 			
-		entry->path = Path::Combine(basedir, INI.GetStringValue("data", "elf"));
+		entry->path = filename;
 		entry->serial.clear();
 		entry->region = INI.GetStringValue("game", "platform") == "256" ? Region::SYSTEM256 : Region::SYSTEM246;
-		entry->type = EntryType::ELF;
+		entry->type = EntryType::ARCADE;
 		entry->compatibility_rating = CompatibilityRating::Unknown;
 		entry->crc = 0x00000000;
 		entry->total_size = 0;
 		entry->title = INI.GetStringValue("game", "name");
 		entry->serial = INI.GetStringValue("game", "gameid");
-		entry->arcade.cards[0] = INI.GetStringValue("data", "dongle");
-		entry->arcade.cards[1] = INI.GetStringValue("data", "card");
-		entry->arcade.mediapath = INI.GetStringValue("data", "mediasrc");
-		entry->arcade.MediaType = ACMEDIATYPE_FROM_STRING(INI.GetStringValue("data", "media"));
 
 	return true;
 }
