@@ -185,6 +185,7 @@ static std::string s_elf_path;
 static std::pair<u32, u32> s_elf_text_range;
 static bool s_elf_executed = false;
 static std::string s_elf_override;
+static std::string s_acgame;
 static std::string s_input_profile_name;
 static u32 s_frame_advance_count = 0;
 static bool s_fast_boot_requested = false;
@@ -1063,6 +1064,11 @@ void VMManager::UpdateDiscDetails(bool booting)
 			cdvdGetDiscInfo(&s_disc_serial, &s_disc_elf, &s_disc_version, &s_disc_crc, nullptr);
 			serial_is_valid = !s_disc_serial.empty();
 		}
+		else if (!s_acgame.empty()) {
+			//s_disc_serial = Path::GetFileTitle(s_acgame);
+			s_disc_version = {};
+			s_disc_crc = 0;
+		}
 		else if (!s_elf_override.empty())
 		{
 			s_disc_serial = Path::GetFileTitle(s_elf_override);
@@ -1275,6 +1281,7 @@ bool VMManager::AutoDetectSource(const std::string& filename, Error* error)
 		}
 		else if (isArcadeManifest(filename))
 		{
+			s_acgame = filename;
 			CDVDsys_ChangeSource(CDVD_SourceType::NoDisc); // COH-H does not have a laser like retails
 			INISettingsInterface INI(filename);
 			if (!INI.Load()){
@@ -1289,7 +1296,7 @@ bool VMManager::AutoDetectSource(const std::string& filename, Error* error)
 				std::string s_acmedia, s_imgname, s_serial;
 				s_acmedia = INI.GetStringValue("data", "media");
 				s_imgname = INI.GetStringValue("data", "mediasrc");
-				s_serial  = INI.GetStringValue("game", "gameid");
+				s_disc_serial = s_serial = INI.GetStringValue("game", "gameid");
 
 				std::string card;
 				if ((card = INI.GetStringValue("data", "dongle", "")) != "") {
@@ -1731,6 +1738,7 @@ void VMManager::Shutdown(bool save_resume_state)
 
 	SaveSessionTime(s_disc_serial);
 	s_elf_override = {};
+	s_acgame = {};
 	ClearELFInfo();
 	CDVDsys_ClearFiles();
 
