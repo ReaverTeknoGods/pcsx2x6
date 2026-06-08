@@ -165,11 +165,14 @@ void ACATAPI::handle_cmd(atapi_packet_t P) {
     }
 
     case ATAPICMD::READ_10: {
-        //Console.Warning("ACATAPI:READ_10: tlen:%X, lba:%X", P.pkt.transf_len, transf_lba);
         if ((!ACATA::TH::IMAGE && !ACATA::TH::isCHD) || nsec == 0) {
-            Console.Error("ACATAPI:READ_10: no image or zero sectors");
-            ACATA::R_STATUS |= ATA_STAT_ERR;
-            ACATA::R_ERROR = ATA_ERR_ABORT;
+            if (nsec == 0) {
+                Console.Warning("ACATAPI:READ_10: zero sectors requested (LBA:%X)", transf_lba);
+            } else {
+                Console.Error("ACATAPI:READ_10: no image open");
+                ACATA::R_STATUS |= ATA_STAT_ERR;
+                ACATA::R_ERROR = ATA_ERR_ABORT;
+            }
             atapi_complete_nodata();
             break;
         }
