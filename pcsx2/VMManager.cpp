@@ -1320,11 +1320,18 @@ bool VMManager::AutoDetectSource(const std::string& filename, Error* error)
 					Console.WriteLnFmt(Color_Green, "ACGAME: System {} detected — extended IOP RAM", platform);
 				}
 
+				// When subdir= is set, basedir points to the subdir (e.g. roms/tekken4/).
+				// Dongle/card files may live elsewhere, so fall back to acgame dir and memcards/.
+				std::string acgamedir = Path::ToNativePath(Path::GetDirectory(filename))+FS_OSPATH_SEPARATOR_CHARACTER;
 				std::string card;
 				// Slot 1 (mc0:) = dongle (boot modules only, no save data).
 				// Always overwrite — DONGLEMAN corrupts this file at runtime.
 				if ((card = INI.GetStringValue("data", "dongle", "")) != "") {
 					std::string src = Path::Combine(basedir, card);
+					if (!FileSystem::FileExists(src.c_str()))
+						src = Path::Combine(acgamedir, card);
+					if (!FileSystem::FileExists(src.c_str()))
+						src = Path::Combine(Path::Combine(acgamedir, "memcards"), card);
 					std::string dst = Path::Combine(EmuFolders::MemoryCards, card);
 					if (FileSystem::FileExists(src.c_str()))
 						FileSystem::CopyFilePath(src.c_str(), dst.c_str(), true);
@@ -1333,6 +1340,10 @@ bool VMManager::AutoDetectSource(const std::string& filename, Error* error)
 				// Slot 2 (mc1:) = save card (e.g. SC2 conquest). Never overwrite existing saves.
 				if ((card = INI.GetStringValue("data", "card", "")) != "") {
 					std::string src = Path::Combine(basedir, card);
+					if (!FileSystem::FileExists(src.c_str()))
+						src = Path::Combine(acgamedir, card);
+					if (!FileSystem::FileExists(src.c_str()))
+						src = Path::Combine(Path::Combine(acgamedir, "memcards"), card);
 					std::string dst = Path::Combine(EmuFolders::MemoryCards, card);
 					if (FileSystem::FileExists(src.c_str()) && !FileSystem::FileExists(dst.c_str()))
 						FileSystem::CopyFilePath(src.c_str(), dst.c_str(), false);
