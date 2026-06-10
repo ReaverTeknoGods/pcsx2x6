@@ -226,7 +226,7 @@ jobs:
         env:
           OWNER: PS2Homebrew-arcade
           REPO: pcsx2x6
-          DISCORD_BUILD_WEBHOOK: ${{ secrets.DISCORD_BUILDS_CHAN }}
+          DISCORD_BUILD_WEBHOOK: ${{ secrets.DISCORD_RELEASE_CHAN }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           TAG_VAL=${{needs.cut-release.outputs.new_tag}}
