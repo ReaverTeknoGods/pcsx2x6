@@ -97,26 +97,8 @@ AutoUpdaterDialog::~AutoUpdaterDialog() = default;
 
 bool AutoUpdaterDialog::isSupported()
 {
-	// Logic to detect whether we can use the auto updater.
-	// We use tagged commit, because this gets set on nightly builds.
-	if (!BuildVersion::GitTaggedCommit)
-		return false;
-
-#ifdef __linux__
-	// For Linux, we need to check whether we're running from the appimage.
-	if (!std::getenv("APPIMAGE"))
-	{
-		Console.Warning("We're a tagged commit, but not running from an AppImage. Disabling automatic updater.");
-		return false;
-	}
-
-	return true;
-#elif defined(_WIN32) || defined(__APPLE__)
-	// Windows, MacOS - always supported.
-	return true;
-#else
+	// Disabled: TeknoParrot ships its own auto-updater for this fork.
 	return false;
-#endif
 }
 
 QStringList AutoUpdaterDialog::getTagList()

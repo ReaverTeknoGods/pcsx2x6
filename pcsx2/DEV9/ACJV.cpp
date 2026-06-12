@@ -8,7 +8,11 @@
 #include "common/SettingsInterface.h"
 #include <array>
 #include <atomic>
+#include <cstdlib>
 #include <string>
+#ifdef _WIN32
+#include "common/RedtapeWindows.h"
+#endif
 
 enum ACJVCMD {
 	UNKNOWN = -2, // unknown CMD, should fire up a warning for developer
@@ -463,8 +467,15 @@ const GunMapping& ACJV::GetGunMapping()
 	return *m_gunMapping;
 }
 
+// Set to true once TeknoParrot shared memory is successfully mapped.
+// When active, mouse input must not override the analog values written by PollTeknoParrotInput().
+static bool s_tp_active = false;
+
 static void UpdateLightgunFromMouse()
 {
+	// TeknoParrot owns the analogs when its shared page is mapped.
+	if (s_tp_active)
+		return;
 	const auto& [mx, my] = InputManager::GetPointerAbsolutePosition(0);
 	float dx, dy;
 	GSTranslateWindowToDisplayCoordinates(mx, my, &dx, &dy);
@@ -796,17 +807,31 @@ void do_jvs_packet(const u8* input, u8* output) {
 			// - RAYS PCB (TC4, Cobra, VPN): full 16-bit range 0xFFFF, Y inverted (bottom-up)
 			// pos=0 means off-screen in JVS, so on-screen values are clamped to minimum 1
 			u16 posX = 0, posY = 0;
-			if(m_jvsMode == JVS_MODE::LIGHTGUN && m_jvsLightgunDX >= 0.0f)
+			if(m_jvsMode == JVS_MODE::LIGHTGUN)
 			{
-				const float scaleX = (ACJV::CurrentBoardID == MIU_IO_JPN_GUN_EXTENTI) ? 640.0f : 0xFFFF;
-				const float scaleY = (ACJV::CurrentBoardID == MIU_IO_JPN_GUN_EXTENTI) ? 224.0f : 0xFFFF;
-				posX = static_cast<u16>(m_jvsLightgunDX * scaleX);
-				if (ACJV::CurrentBoardID == RAYS_PCB || ACJV::CurrentBoardID == MIU_IO_JPN_GUN_EXTENTI)
-					posY = static_cast<u16>((1.0f - m_jvsLightgunDY) * scaleY);
+#ifdef _WIN32
+				if (s_tp_active)
+				{
+					// TeknoParrot provides raw 0-255 stored as the high byte in
+					// m_jvsScreenPosX/Y. Output directly — no float path, no Y inversion.
+					// Matches Play-'s SCRPOSINP default: analog0 as MSB, LSB=0.
+					posX = m_jvsScreenPosX;
+					posY = m_jvsScreenPosY;
+				}
 				else
-					posY = static_cast<u16>(m_jvsLightgunDY * scaleY);
-				if (posX == 0) posX = 1;
-				if (posY == 0) posY = 1;
+#endif
+				if (m_jvsLightgunDX >= 0.0f)
+				{
+					const float scaleX = (ACJV::CurrentBoardID == MIU_IO_JPN_GUN_EXTENTI) ? 640.0f : 0xFFFF;
+					const float scaleY = (ACJV::CurrentBoardID == MIU_IO_JPN_GUN_EXTENTI) ? 224.0f : 0xFFFF;
+					posX = static_cast<u16>(m_jvsLightgunDX * scaleX);
+					if (ACJV::CurrentBoardID == RAYS_PCB || ACJV::CurrentBoardID == MIU_IO_JPN_GUN_EXTENTI)
+						posY = static_cast<u16>((1.0f - m_jvsLightgunDY) * scaleY);
+					else
+						posY = static_cast<u16>(m_jvsLightgunDY * scaleY);
+					if (posX == 0) posX = 1;
+					if (posY == 0) posY = 1;
+				}
 			}
 			for (u8 ch = 0; ch < channel; ch++)
 			{
@@ -859,8 +884,175 @@ void do_jvs_packet(const u8* input, u8* output) {
 }
 
 
+#ifdef _WIN32
+// ---------------------------------------------------------------------------
+// TeknoParrot shared memory ("TeknoParrot_JvsState", 64 bytes)
+// Mirrors the layout used by RPCS3's usio.cpp so TeknoParrot can drive both
+// emulators with the same write-side code.
+//
+// Byte layout:
+//   +0-7  : unused header
+//   +8    : u64 digital_buttons  — P1 bits at shift=0, P2 bits at shift=24
+//   +16   : u8  analog_x         — gun/wheel X, 0-255, scaled to 16-bit for JVS
+//   +17   : u8  analog_y         — gun/wheel Y, 0-255
+//   +32   : u8  coin1_state      — non-zero on P1 coin pulse (rising edge = insert)
+//   +33   : u8  test_state       — bit 7 = test pressed (rising edge = toggle DIP)
+//   +34   : u8  coin2_state      — non-zero on P2 coin pulse (rising edge = insert)
+//
+// P1/P2 digital button bits (P1 at shift=0, P2 at shift=24):
+//   0x004000 << shift  : Service  (P1 only — no P2 service in the TeknoParrot wire protocol)
+//   0x010000 << shift  : BTN2
+//   0x020000 << shift  : BTN1
+//   0x040000 << shift  : Right
+//   0x080000 << shift  : Left
+//   0x100000 << shift  : Down
+//   0x200000 << shift  : Up
+//   0x800000 << shift  : Start
+//   0x20000000 << shift: BTN4
+//   0x40000000 << shift: BTN3
+//   0x80000000 << shift: BTN5
+// ---------------------------------------------------------------------------
+static HANDLE s_teknoparrot_file_mapping = nullptr;
+static void* s_teknoparrot_view_ptr = nullptr;
+static bool s_tp_coin1_prev = false;
+static bool s_tp_test_prev = false;
+
+static void ShutdownTeknoParrot()
+{
+	if (s_teknoparrot_view_ptr)
+	{
+		UnmapViewOfFile(s_teknoparrot_view_ptr);
+		s_teknoparrot_view_ptr = nullptr;
+	}
+	if (s_teknoparrot_file_mapping)
+	{
+		CloseHandle(s_teknoparrot_file_mapping);
+		s_teknoparrot_file_mapping = nullptr;
+	}
+}
+
+static bool InitTeknoParrot()
+{
+	if (s_teknoparrot_view_ptr)
+		return true;
+
+	s_teknoparrot_file_mapping = CreateFileMappingA(
+		INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, 64, "TeknoParrot_JvsState");
+	if (!s_teknoparrot_file_mapping)
+	{
+		Console.Error("ACJV: Failed to create TeknoParrot_JvsState shared memory");
+		return false;
+	}
+
+	s_teknoparrot_view_ptr = MapViewOfFile(
+		s_teknoparrot_file_mapping, FILE_MAP_ALL_ACCESS, 0, 0, 64);
+	if (!s_teknoparrot_view_ptr)
+	{
+		Console.Error("ACJV: Failed to map TeknoParrot_JvsState view");
+		CloseHandle(s_teknoparrot_file_mapping);
+		s_teknoparrot_file_mapping = nullptr;
+		return false;
+	}
+
+	s_tp_active = true;
+	std::atexit(ShutdownTeknoParrot);
+	Console.WriteLn("ACJV: TeknoParrot_JvsState shared memory initialized");
+	return true;
+}
+
+static void PollTeknoParrotInput()
+{
+	if (!InitTeknoParrot())
+		return;
+
+	const auto* mem = static_cast<const u8*>(s_teknoparrot_view_ptr);
+
+	// Digital buttons: bytes directly encode JVS button bits (same bit layout as JVSButton enum).
+	// Matches the Play- fork's Iop_NamcoSys246.cpp layout exactly.
+	//   +9  = P1 low  byte: START=0x80 SVC=0x40 UP=0x20 DN=0x10 L=0x08 R=0x04 BTN1=0x02 BTN2=0x01
+	//   +10 = P1 high byte: BTN3=0x80 BTN4=0x40 BTN5=0x20 BTN6=0x10
+	//   +11 = P2 low byte, +12 = P2 high byte
+	static constexpr u16 s_all_jvs_bits[] = {
+		JVS_BTN_START, JVS_BTN_SERVICE, JVS_BTN_UP, JVS_BTN_DOWN,
+		JVS_BTN_LEFT, JVS_BTN_RIGHT, JVS_BTN_1, JVS_BTN_2,
+		JVS_BTN_3, JVS_BTN_4, JVS_BTN_5, JVS_BTN_6,
+	};
+	const u8 raw_bytes[JVS_PLAYER_COUNT][2] = {
+		{ mem[9],  mem[10] }, // P1: low, high
+		{ mem[11], mem[12] }, // P2: low, high
+	};
+	for (u32 player = 0; player < JVS_PLAYER_COUNT; player++)
+	{
+		const u16 raw_state = static_cast<u16>(raw_bytes[player][0]) |
+		                      (static_cast<u16>(raw_bytes[player][1]) << 8);
+		for (const u16 bit : s_all_jvs_bits)
+			ACJV::SetButtonState(player, bit, (raw_state & bit) != 0);
+	}
+
+	// Test: byte +8 bit 7, rising edge toggles TestMode DIP switch
+	const bool test_now = (mem[8] & 0x80) != 0;
+	if (test_now && !s_tp_test_prev)
+		ACJV::ToggleDIPSwitchState(0); // index 0 = TestMode
+	s_tp_test_prev = test_now;
+
+	// Coin: byte +32, rising edge inserts a coin for both slots (matching Play- behaviour
+	// where slotCount==2 means both counters are incremented on a single coin pulse)
+	const bool coin_now = mem[32] != 0;
+	if (coin_now && !s_tp_coin1_prev)
+	{
+		ACJV::InsertCoin(0);
+		ACJV::InsertCoin(1);
+	}
+	s_tp_coin1_prev = coin_now;
+
+	// Analogs: +13=gun_X/wheel, +14=gun_Y/gas, +15=brake/P2_gun_X, +16=P2_gun_Y
+	// Matching Play-'s JVS_CMD_ANLINP and JVS_CMD_SCRPOSINP handlers.
+	if (m_jvsMode == JVS_MODE::LIGHTGUN)
+	{
+		const u8 ax = mem[13]; // gun X
+		const u8 ay = mem[14]; // gun Y
+		if (s_gameid == "NM00021" || s_gameid == "NM00032") // cobrata / cobrataw / TC4
+		{
+			// Play-'s cobrata handler: fill both bytes with the raw value so the full
+			// 0x0000-0xFFFF range is used (0x0101 steps). Off-screen: X=0 → 0xFFFF.
+			// Axis swap and Y inversion are already handled on the TeknoParrot write side.
+			u16 a2 = (static_cast<u16>(ax) << 8) | ax; // X
+			u16 a0 = (static_cast<u16>(ay) << 8) | ay; // Y
+			if (ax == 0) a2 = 0xFFFF; // X=0 means off-screen in cobrata
+			m_jvsScreenPosX = a2;
+			m_jvsScreenPosY = a0;
+		}
+		else
+		{
+			// Default: store raw byte as the high byte of the 16-bit JVS value, matching
+			// Play-'s SCRPOSINP default output (analog0/analog2 as MSB, LSB=0).
+			// Always update — (0,0) is a valid screen position, not an off-screen sentinel.
+			m_jvsScreenPosX = static_cast<u16>(ax) << 8;
+			m_jvsScreenPosY = static_cast<u16>(ay) << 8;
+		}
+	}
+	else if (m_jvsMode == JVS_MODE::DRIVE)
+	{
+		// +13=wheel, +14=gas, +15=brake; stored as high byte (×256) matching Play- output
+		m_jvsWheelChannels[0] = static_cast<u16>(mem[13]) << 8; // wheel / steering
+		m_jvsWheelChannels[1] = static_cast<u16>(mem[14]) << 8; // gas
+		m_jvsWheelChannels[2] = static_cast<u16>(mem[15]) << 8; // brake
+	}
+	else if (m_jvsMode == JVS_MODE::DRUM)
+	{
+		// +13..+16 cover first 4 drum channels; channels 4-7 left to gamepad input
+		// (TeknoParrot typically only has 4 sensor bytes available in this range)
+		for (int i = 0; i < 4 && i < JVS_DRUM_CHANNEL_MAX; i++)
+			m_jvsDrumChannels[i] = static_cast<u16>(mem[13 + i]) << 6; // 0-255 → 0-0x3FC0
+	}
+}
+#endif // _WIN32
+
 // based on https://github.com/search?q=repo%3Ajpd002/Play-%20CSys246%3A%3AProcessJvsPacket&type=code by Jean-Philip Desjardins
 void do_acjv_packet() {
+#ifdef _WIN32
+	PollTeknoParrotInput();
+#endif
 	const u16* wr16 = wrbuf_getu16();
 	u16* rd16 = rdbuf_getu16();
 	rd16[0] = wr16[0];

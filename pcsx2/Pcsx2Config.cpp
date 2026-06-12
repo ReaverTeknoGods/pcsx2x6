@@ -2198,7 +2198,8 @@ std::string EmuFolders::GetPortableModePath()
 	const auto portable_txt_path = Path::Combine(AppRoot, "portable.txt");
 	const auto portable_path = FileSystem::ReadFileToString(portable_txt_path.c_str()).value_or("");
 	const auto trimmed_path = StringUtil::StripWhitespace(portable_path);
-	return std::string(trimmed_path);
+	// Default to a TeknoParrot subfolder so data doesn't scatter into the exe directory.
+	return trimmed_path.empty() ? "TeknoParrot" : std::string(trimmed_path);
 }
 
 ///TODOX: decide if fork needs a dedicated folder to be alone

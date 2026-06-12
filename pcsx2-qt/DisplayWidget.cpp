@@ -15,6 +15,9 @@
 #include <QtCore/QDebug>
 #include <QtCore/QTimer>
 #include <QtGui/QGuiApplication>
+#ifdef _WIN32
+#include <Windows.h>
+#endif
 #include <QtGui/QKeyEvent>
 #include <QtGui/QResizeEvent>
 #include <QtGui/QScreen>
@@ -231,6 +234,12 @@ void DisplaySurface::handleKeyInputEvent(QEvent* event)
 		{
 			const QKeyEvent* key_event = static_cast<QKeyEvent*>(event);
 
+#ifdef _WIN32
+			// TeknoParrot: ESC exits the process immediately so the launcher can clean up.
+			if (key_event->type() == QEvent::KeyPress && key_event->key() == Qt::Key_Escape)
+				ExitProcess(0);
+#endif
+
 			// Forward text input to imgui.
 			if (ImGuiManager::WantsTextInput() && key_event->type() == QEvent::KeyPress)
 			{
@@ -357,16 +366,8 @@ bool DisplaySurface::event(QEvent* event)
 				});
 			}
 
-			// don't toggle fullscreen when we're bound.. that wouldn't end well.
-			if (event->type() == QEvent::MouseButtonDblClick &&
-				static_cast<const QMouseEvent*>(event)->button() == Qt::LeftButton &&
-				QtHost::IsVMValid() && !FullscreenUI::HasActiveWindow() &&
-				((!QtHost::IsVMPaused() && !InputManager::HasAnyBindingsForKey(InputManager::MakePointerButtonKey(0, 0))) ||
-					(QtHost::IsVMPaused() && !ImGuiManager::WantsMouseInput())) &&
-				Host::GetBoolSettingValue("UI", "DoubleClickTogglesFullscreen", true))
-			{
-				g_emu_thread->toggleFullscreen();
-			}
+			// TeknoParrot: double-click-to-fullscreen disabled — interferes with lightgun/touch input.
+			// if (event->type() == QEvent::MouseButtonDblClick && ...)
 
 			return true;
 		}
