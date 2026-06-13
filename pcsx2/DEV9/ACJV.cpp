@@ -1013,14 +1013,30 @@ static void PollTeknoParrotInput()
 		const u8 ay = mem[14]; // gun Y
 		if (s_gameid == "NM00021" || s_gameid == "NM00032") // cobrata / cobrataw / TC4
 		{
-			// Play-'s cobrata handler: fill both bytes with the raw value so the full
-			// 0x0000-0xFFFF range is used (0x0101 steps). Off-screen: X=0 → 0xFFFF.
-			// Axis swap and Y inversion are already handled on the TeknoParrot write side.
-			u16 a2 = (static_cast<u16>(ax) << 8) | ax; // X
-			u16 a0 = (static_cast<u16>(ay) << 8) | ay; // Y
-			if (ax == 0) a2 = 0xFFFF; // X=0 means off-screen in cobrata
+			// Matches Play-'s cobrata ANLINP handler exactly:
+			//   analog0 = mem[13] → Y axis, bitwise-inverted
+			//   analog2 = mem[14] → X axis
+			// Both bytes filled (0x0101 steps across full 0x0000-0xFFFF range).
+			// Off-screen: if X input==0 → X=0xFFFF; if Y after inversion==0xFFFF → Y=0x0.
+			u16 a0 = (static_cast<u16>(ax) << 8) | ax; // Y from mem[13]
+			u16 a2 = (static_cast<u16>(ay) << 8) | ay; // X from mem[14]
+			a0 = ~a0;                   // invert Y axis
+			if (ay == 0)  a2 = 0xFFFF; // X=0 → off-screen
+			if (a0 == 0xFFFF) a0 = 0x0; // inverted Y edge case
 			m_jvsScreenPosX = a2;
 			m_jvsScreenPosY = a0;
+		}
+		else if (s_gameid == "NM00012") // Time Crisis 3
+		{
+			// Matches Play-'s SCRPOSINP handler for timecrs3 exactly.
+			// Both axes are inverted (255-byte), then scaled with xform from timecrs3.arcadedef:
+			//   screenPosXform = [660, 16053, 220, 16273]
+			//   mem[14] = raw X from TP → gunX = (255-mem[14])/255.0f → posX = gunX*660 + 16053
+			//   mem[13] = raw Y from TP → gunY = (255-mem[13])/255.0f → posY = gunY*220 + 16273
+			const float gunX = static_cast<float>(255 - ay) / 255.0f; // mem[14] = X
+			const float gunY = static_cast<float>(255 - ax) / 255.0f; // mem[13] = Y
+			m_jvsScreenPosX = static_cast<u16>(gunX * 660.0f + 16053.0f);
+			m_jvsScreenPosY = static_cast<u16>(gunY * 220.0f + 16273.0f);
 		}
 		else
 		{
