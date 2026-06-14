@@ -80,7 +80,13 @@ for gameid, info in game_db.items():
     if media == "???":
         print(f"[FAIL] '{acgame_path}' no media type inside. skipping")
         continue
-    
+
+    JVSMODE_MAP = {
+        "NM00039": "driving",  # MotoGP
+    }
+    jvsmode = JVSMODE_MAP.get(gameid, "")
+    jvsmode_line = f"\njvsmode={jvsmode}" if jvsmode else ""
+
     acgame = f"""
 [game]
 name={name}
@@ -92,7 +98,7 @@ subdir={gameid}
 elf=proverb.elf
 dongle={gameid}.ps2
 mediasrc={gameid}.chd
-media={media}
+media={media}{jvsmode_line}
 """
 
     acgame_path = OUTPUT_DIR / f"{gameid}.acgame"

@@ -200,6 +200,10 @@ std::span<const InputBindingInfo> ACJV::GetDIPSwitchBindings()
 }
 
 static JVS_MODE m_jvsMode = JVS_MODE::DEFAULT;
+static float s_tp_gun_norm_x  = -1.0f;
+static float s_tp_gun_norm_y  = -1.0f;
+static float s_tp_gun_norm_x2 = -1.0f;
+static float s_tp_gun_norm_y2 = -1.0f;
 
 std::span<const InputBindingInfo> ACJV::GetButtonBindings()
 {
@@ -409,6 +413,12 @@ int ACJV::GetSindenBorderThickness()
 	return s_sinden_border_thickness;
 }
 
+std::pair<float, float> ACJV::GetLightgunNormalizedPosition(u32 player)
+{
+	if (player == 1) return {s_tp_gun_norm_x2, s_tp_gun_norm_y2};
+	return {s_tp_gun_norm_x, s_tp_gun_norm_y};
+}
+
 void ACJV::SetScreenPos(u16 x, u16 y)
 {
 	m_jvsScreenPosX = x;
@@ -579,7 +589,6 @@ void do_jvs_packet(const u8* input, u8* output) {
 			(*output++) = 0x10;             //16 switches
 			(*output++) = 0x00;
 			// TODO: driving games (e.g. Wangan Midnight)
-#if 0
 			if(m_jvsMode == JVS_MODE::DRIVE)
 			{
 				(*output++) = 0x03;                  //Analog Input
@@ -589,7 +598,6 @@ void do_jvs_packet(const u8* input, u8* output) {
 				(*dstSize) += 4;
 			}
 			else
-#endif
 			if(m_jvsMode == JVS_MODE::LIGHTGUN)
 			{
 				(*output++) = 0x06; //Screen Pos Input
@@ -1009,42 +1017,46 @@ static void PollTeknoParrotInput()
 	// Matching Play-'s JVS_CMD_ANLINP and JVS_CMD_SCRPOSINP handlers.
 	if (m_jvsMode == JVS_MODE::LIGHTGUN)
 	{
-		const u8 ax = mem[13]; // gun X
-		const u8 ay = mem[14]; // gun Y
+		const u8 ax = mem[13]; // raw byte from TP (axis meaning varies by game)
+		const u8 ay = mem[14]; // raw byte from TP (axis meaning varies by game)
 		if (s_gameid == "NM00021" || s_gameid == "NM00032") // cobrata / cobrataw / TC4
 		{
-			// Matches Play-'s cobrata ANLINP handler exactly:
-			//   analog0 = mem[13] → Y axis, bitwise-inverted
-			//   analog2 = mem[14] → X axis
-			// Both bytes filled (0x0101 steps across full 0x0000-0xFFFF range).
-			// Off-screen: if X input==0 → X=0xFFFF; if Y after inversion==0xFFFF → Y=0x0.
+			// analog0 = mem[13] → Y axis, bitwise-inverted
+			// analog2 = mem[14] → X axis
 			u16 a0 = (static_cast<u16>(ax) << 8) | ax; // Y from mem[13]
 			u16 a2 = (static_cast<u16>(ay) << 8) | ay; // X from mem[14]
-			a0 = ~a0;                   // invert Y axis
-			if (ay == 0)  a2 = 0xFFFF; // X=0 → off-screen
+			a0 = ~a0;                    // invert Y axis
+			if (ay == 0)  a2 = 0xFFFF;  // X=0 → off-screen
 			if (a0 == 0xFFFF) a0 = 0x0; // inverted Y edge case
 			m_jvsScreenPosX = a2;
 			m_jvsScreenPosY = a0;
+			// mem[14]=X(inverted), mem[13]=Y(inverted); mem[15]=P2X(inv), mem[16]=P2Y(inv)
+			s_tp_gun_norm_x  = 1.0f - static_cast<float>(ay)       / 255.0f;
+			s_tp_gun_norm_y  = 1.0f - static_cast<float>(ax)       / 255.0f;
+			s_tp_gun_norm_x2 = 1.0f - static_cast<float>(mem[16])  / 255.0f;
+			s_tp_gun_norm_y2 = 1.0f - static_cast<float>(mem[15])  / 255.0f;
 		}
 		else if (s_gameid == "NM00012") // Time Crisis 3
 		{
-			// Matches Play-'s SCRPOSINP handler for timecrs3 exactly.
-			// Both axes are inverted (255-byte), then scaled with xform from timecrs3.arcadedef:
-			//   screenPosXform = [660, 16053, 220, 16273]
-			//   mem[14] = raw X from TP → gunX = (255-mem[14])/255.0f → posX = gunX*660 + 16053
-			//   mem[13] = raw Y from TP → gunY = (255-mem[13])/255.0f → posY = gunY*220 + 16273
-			const float gunX = static_cast<float>(255 - ay) / 255.0f; // mem[14] = X
-			const float gunY = static_cast<float>(255 - ax) / 255.0f; // mem[13] = Y
+			// mem[14] = raw X from TP (inverted), mem[13] = raw Y from TP (inverted)
+			const float gunX = static_cast<float>(255 - ay) / 255.0f;
+			const float gunY = static_cast<float>(255 - ax) / 255.0f;
 			m_jvsScreenPosX = static_cast<u16>(gunX * 660.0f + 16053.0f);
 			m_jvsScreenPosY = static_cast<u16>(gunY * 220.0f + 16273.0f);
+			s_tp_gun_norm_x  = gunX;
+			s_tp_gun_norm_y  = gunY;
+			s_tp_gun_norm_x2 = -1.0f; // TC3 is single-gun
+			s_tp_gun_norm_y2 = -1.0f;
 		}
 		else
 		{
-			// Default: store raw byte as the high byte of the 16-bit JVS value, matching
-			// Play-'s SCRPOSINP default output (analog0/analog2 as MSB, LSB=0).
-			// Always update — (0,0) is a valid screen position, not an off-screen sentinel.
+			// Default: mem[13]=P1X, mem[14]=P1Y, mem[15]=P2X, mem[16]=P2Y (Y inverted)
 			m_jvsScreenPosX = static_cast<u16>(ax) << 8;
 			m_jvsScreenPosY = static_cast<u16>(ay) << 8;
+			s_tp_gun_norm_x  = static_cast<float>(ax)      / 255.0f;
+			s_tp_gun_norm_y  = 1.0f - static_cast<float>(ay)      / 255.0f;
+			s_tp_gun_norm_x2 = static_cast<float>(mem[15]) / 255.0f;
+			s_tp_gun_norm_y2 = 1.0f - static_cast<float>(mem[16]) / 255.0f;
 		}
 	}
 	else if (m_jvsMode == JVS_MODE::DRIVE)

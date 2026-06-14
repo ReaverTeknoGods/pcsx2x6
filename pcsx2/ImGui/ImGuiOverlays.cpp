@@ -1813,6 +1813,40 @@ void ImGuiManager::RenderOverlays()
 	const float spacing = std::ceil(5.0f * scale);
 	float position_y = margin;
 
+	// In TeknoParrot lightgun mode, draw crosshairs for each active gun.
+	if (ACJV::GetMode() == JVS_MODE::LIGHTGUN)
+	{
+		const struct { u32 player; ImU32 color; } guns[] = {
+			{ 0, IM_COL32(220, 0,   0,   230) }, // P1 red
+			{ 1, IM_COL32(0,   220, 0,   230) }, // P2 green
+		};
+		for (const auto& g : guns)
+		{
+			const auto [nx, ny] = ACJV::GetLightgunNormalizedPosition(g.player);
+			if (nx < 0.0f || ny < 0.0f) continue;
+			const float px = nx * ImGuiManager::GetWindowWidth();
+			const float py = ny * ImGuiManager::GetWindowHeight();
+			if (g.player == 0)
+				InputManager::UpdatePointerAbsolutePosition(0, px, py);
+			ImDrawList* dl = ImGui::GetForegroundDrawList();
+			constexpr float arm = 18.0f;
+			constexpr float gap = 5.0f;
+			constexpr float thick = 2.5f;
+			const ImU32 outline = IM_COL32(0, 0, 0, 200);
+			const ImU32 col = g.color;
+			dl->AddLine({px - arm, py}, {px - gap, py}, outline, thick + 2.0f);
+			dl->AddLine({px + gap, py}, {px + arm, py}, outline, thick + 2.0f);
+			dl->AddLine({px, py - arm}, {px, py - gap}, outline, thick + 2.0f);
+			dl->AddLine({px, py + gap}, {px, py + arm}, outline, thick + 2.0f);
+			dl->AddLine({px - arm, py}, {px - gap, py}, col, thick);
+			dl->AddLine({px + gap, py}, {px + arm, py}, col, thick);
+			dl->AddLine({px, py - arm}, {px, py - gap}, col, thick);
+			dl->AddLine({px, py + gap}, {px, py + arm}, col, thick);
+			dl->AddCircleFilled({px, py}, 2.5f, outline);
+			dl->AddCircleFilled({px, py}, 1.5f, col);
+		}
+	}
+
 	DrawSindenBorder();
 	DrawIndicatorsOverlay(position_y, scale, margin, spacing);
 	DrawVideoCaptureOverlay(position_y, scale, margin, spacing);

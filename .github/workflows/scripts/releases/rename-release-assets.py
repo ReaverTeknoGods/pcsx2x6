@@ -45,5 +45,4 @@ for dir_name in os.listdir(scan_dir):
       break
 
   if not dir_handled:
-    print("Could not find asset in directory when one was expected")
-    exit(1)
+    print("Warning: no releasable asset found in directory '{}', skipping".format(dir_name))

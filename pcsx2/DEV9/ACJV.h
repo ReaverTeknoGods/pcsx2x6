@@ -118,6 +118,10 @@ namespace ACJV {
     bool IsSindenBorderEnabled();
     int GetSindenBorderMode();
     int GetSindenBorderThickness();
+
+    // Returns the current gun aim position normalized to [0,1] in screen space.
+    // Valid only in LIGHTGUN mode when TeknoParrot is active; returns (-1,-1) otherwise.
+    std::pair<float, float> GetLightgunNormalizedPosition(u32 player = 0);
 }
 
 

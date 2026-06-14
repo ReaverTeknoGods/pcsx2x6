@@ -16,6 +16,8 @@
 #include "DEV9/ACJV.h"
 
 #include "common/Console.h"
+#include "common/FileSystem.h"
+#include "common/Path.h"
 #include "common/StringUtil.h"
 
 #include <tuple>
@@ -518,6 +520,14 @@ namespace usb_lightgun
 		// Pointer settings.
 		const std::string pointer_binding = USB::GetConfigString(si, s->port, TypeName(), "Pointer", "");
 		std::string cursor_path(USB::GetConfigString(si, s->port, TypeName(), "cursor_path"));
+		// Auto-default TeknoParrot crosshair images if no cursor_path is configured.
+		if (cursor_path.empty() && ACJV::GetMode() == JVS_MODE::LIGHTGUN)
+		{
+			const char* fname = (s->port == 0) ? "P1.png" : "P2.png";
+			std::string candidate = Path::Combine(Path::Combine(EmuFolders::AppRoot, "TeknoParrot/Crosshairs"), fname);
+			if (FileSystem::FileExists(candidate.c_str()))
+				cursor_path = std::move(candidate);
+		}
 		const float cursor_scale = USB::GetConfigFloat(si, s->port, TypeName(), "cursor_scale", 1.0f);
 		u32 cursor_color = 0xFFFFFF;
 		if (std::string cursor_color_str(USB::GetConfigString(si, s->port, TypeName(), "cursor_color")); !cursor_color_str.empty())

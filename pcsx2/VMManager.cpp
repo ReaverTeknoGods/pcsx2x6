@@ -1367,6 +1367,16 @@ bool VMManager::AutoDetectSource(const std::string& filename, Error* error)
 				EmuConfig.CurrentGameArgs = INI.GetStringValue("data", "args");
 				ACSRAM::filepath = Path::Combine(basedir, INI.GetStringValue("data", "sram", "sram.bin"));
 				std::string jvsmode = INI.GetStringValue("data", "jvsmode", "");
+				// Per-game jvsmode defaults when not specified in the .acgame file
+				if (jvsmode.empty())
+				{
+					static const std::unordered_map<std::string, std::string> s_jvsmode_defaults = {
+						{ "NM00039", "driving" }, // MotoGP
+					};
+					const auto it = s_jvsmode_defaults.find(s_serial);
+					if (it != s_jvsmode_defaults.end())
+						jvsmode = it->second;
+				}
 				if (jvsmode == "lightgun")
 				{
 					Host::SetBaseStringSettingValue("USB1", "Type", "guncon2");
@@ -1382,6 +1392,11 @@ bool VMManager::AutoDetectSource(const std::string& filename, Error* error)
 					{
 						ACJV::SetMode(JVS_MODE::FIGHTING);
 						Console.WriteLn(Color_Green, "ACGAME: jvsmode=fighting");
+					}
+					else if (jvsmode == "driving")
+					{
+						ACJV::SetMode(JVS_MODE::DRIVE);
+						Console.WriteLn(Color_Green, "ACGAME: jvsmode=driving");
 					}
 					else
 						ACJV::SetMode(JVS_MODE::DEFAULT);

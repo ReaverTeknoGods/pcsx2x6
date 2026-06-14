@@ -127,14 +127,32 @@ jobs:
     if: github.repository == 'PS2Homebrew-arcade/pcsx2x6'
     needs:
       - cut-release
-    name: "Windows"
+    name: "Windows SSE4"
     uses: ./.github/workflows/windows_build_qt.yml
     with:
-      jobName: "Windows Build"
+      jobName: "Windows SSE4 Build"
       artifactPrefixName: "PCSX2-windows-Qt-x64"
       configuration: CMake
       buildSystem: cmake
       cmakeFlags: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl
+      disableAdvancedSimd: true
+      fetchTags: true
+      stableBuild: ${{ github.event_name == 'workflow_dispatch' && inputs.is_prerelease == 'false' }}
+    secrets: inherit
+
+  build_windows_qt_avx2:
+    if: github.repository == 'PS2Homebrew-arcade/pcsx2x6'
+    needs:
+      - cut-release
+    name: "Windows AVX2"
+    uses: ./.github/workflows/windows_build_qt.yml
+    with:
+      jobName: "Windows AVX2 Build"
+      artifactPrefixName: "PCSX2-windows-Qt-x64-avx2"
+      configuration: CMake
+      buildSystem: cmake
+      cmakeFlags: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DPCSX2_EXE_NAME=pcsx2-qtx64-avx2
+      disableAdvancedSimd: false
       fetchTags: true
       stableBuild: ${{ github.event_name == 'workflow_dispatch' && inputs.is_prerelease == 'false' }}
     secrets: inherit
@@ -175,6 +193,7 @@ jobs:
       - build_linux_flatpak
       - build_linux_qt
       - build_windows_qt
+      - build_windows_qt_avx2
       - build_macos_qt
     name: "Upload Artifacts"
     runs-on: ubuntu-latest
@@ -195,7 +214,19 @@ jobs:
       # Prepare artifacts, they are all zips from github!
       - name: Prepare Artifacts
         working-directory: ./ci-artifacts/
-        run: for d in *windows*/; do 7z a "${d}asset.7z" ./$d/*; done
+        run: |
+          # Copy the AVX2 exe into the SSE4 artifact dir so both ship in one zip
+          SSE4_DIR=$(find . -maxdepth 1 -mindepth 1 -type d -name "*windows*" ! -name "*avx2*" ! -name "*symbols*" | head -1 | sed 's|^\./||')
+          AVX2_DIR=$(find . -maxdepth 1 -mindepth 1 -type d -name "*windows*avx2*" ! -name "*symbols*" | head -1 | sed 's|^\./||')
+          if [ -n "$SSE4_DIR" ] && [ -n "$AVX2_DIR" ]; then
+            cp "$AVX2_DIR/pcsx2-qtx64-avx2.exe" "$SSE4_DIR/"
+            echo "Merged pcsx2-qtx64-avx2.exe into $SSE4_DIR"
+          fi
+          # Zip all windows dirs except the bare AVX2 dir (its exe is already merged)
+          for d in *windows*/; do
+            [[ "$d" == *avx2* ]] && [[ "$d" != *symbols* ]] && continue
+            7z a "${d}asset.7z" ./$d/*
+          done
 
       - name: Name and Upload the Release Assets
         env:
