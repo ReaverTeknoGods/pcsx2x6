@@ -285,9 +285,12 @@ void DisplaySurface::handleKeyInputEvent(QEvent* event)
 				m_keys_pressed_with_modifiers.push_back(key);
 			}
 
-			Host::RunOnCPUThread([key, pressed]() {
-				InputManager::InvokeEvents(InputManager::MakeHostKeyboardKey(key), static_cast<float>(pressed));
-			});
+			// TeknoParrot fork: keyboard events are not forwarded to InputManager.
+			// All game input comes from TeknoParrot shared memory via ACJV; keyboard hotkeys
+			// (pause, fast-forward, etc.) would accidentally fire during normal arcade play.
+			// Host::RunOnCPUThread([key, pressed]() {
+			// 	InputManager::InvokeEvents(InputManager::MakeHostKeyboardKey(key), static_cast<float>(pressed));
+			// });
 
 			return;
 		}

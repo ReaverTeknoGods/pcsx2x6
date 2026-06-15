@@ -1654,8 +1654,9 @@ void InputManager::ReloadBindings(SettingsInterface& si, SettingsInterface& bind
 	s_keyboard_event_callbacks.clear();
 	s_pointer_move_callbacks.clear();
 
-	// Hotkeys use the base configuration, except if the custom hotkeys option is enabled.
-	AddHotkeyBindings(hotkey_binding_si, is_hotkey_profile);
+	// TeknoParrot fork: hotkeys disabled — all input flows through JVS/TeknoParrot shared memory.
+	// Hotkeys from keyboard/gamepad would interfere with arcade games (e.g. Space=pause, Tab=fast-forward).
+	// AddHotkeyBindings(hotkey_binding_si, is_hotkey_profile);
 	AddJVSBindings(binding_si, is_binding_profile);
 
 	// S246/S256 cabinets have no DS2 controller — pad bindings are mirrored to JVS above.
