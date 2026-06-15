@@ -318,7 +318,7 @@ void AutoUpdaterDialog::getLatestReleaseComplete(s32 status_code, std::vector<u8
 					else
 					{
 						m_latest_version = data_object["version"].toString();
-						m_latest_version_timestamp = QDateTime::fromString(data_object["publishedAt"].toString(), QStringLiteral("yyyy-MM-ddThh:mm:ss.zzzZ"));
+						m_latest_version_timestamp = QDateTime::fromString(data_object["publishedAt"].toString(), Qt::ISODate);
 						m_download_url = best_asset["url"].toString();
 						m_download_size = best_asset["size"].toInt();
 						found_update_info = true;

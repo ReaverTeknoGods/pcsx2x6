@@ -83,6 +83,7 @@
 #include "common/ARCADE.h"
 
 #include "DEV9/ACATA.h"
+#include "DEV9/ACATAPI.h"
 #include "DEV9/ACJV.h"
 #include "DEV9/ACSRAM.h"
 
@@ -1315,6 +1316,14 @@ bool VMManager::AutoDetectSource(const std::string& filename, Error* error)
 				s_imgname = INI.GetStringValue("data", "mediasrc");
 				s_title = s_serial = INI.GetStringValue("game", "name");
 				s_disc_serial = s_serial = INI.GetStringValue("game", "gameid");
+				bool idvalid = (s_serial.length() == 7 && (s_serial[0] == 'N' && s_serial[1] == 'M'));
+    			for (int i = 2; idvalid && i < 7; i++)
+    			    idvalid = (s_serial[i] >= '0' && s_serial[i] <= '9');
+				if (!idvalid) {
+					Error::SetStringFmt(error, "Invalid GameID! '{}'", s_serial);
+					return false;
+				}
+
 				ACJV::SetGameId(s_serial); // Adapt JVS input to detected GAMEID
 				std::string platform = INI.GetStringValue("game", "platform", "");
 				s_acgame_sys246 = (platform == "246" || platform == "256" || platform == "super256");
@@ -1323,9 +1332,9 @@ bool VMManager::AutoDetectSource(const std::string& filename, Error* error)
 					PS2CLK = PS2CLK_SS256;
 				else if (s_acgame_sys256)
 					PS2CLK = PS2CLK_S256;
-				if (s_acgame_sys246)
+				if (s_acgame_sys256)
 				{
-					Console.WriteLnFmt(Color_Green, "ACGAME: System {} detected — extended IOP RAM", platform);
+					Console.WriteLnFmt(Color_Green, "ACGAME: System {} requested — overclock will be applied", platform);
 				}
 
 				// When subdir= is set, basedir points to the subdir (e.g. roms/tekken4/).
@@ -1407,6 +1416,11 @@ bool VMManager::AutoDetectSource(const std::string& filename, Error* error)
 				if ((R = ACATA::TH::IO_OpenImage())!=0) {
 					Error::SetString(error, std::string("cannot open arcade media image"));
 					return false;
+				}
+				if (s_acmedia == "CD" && !ACATA::imgpath.empty()) {
+					CDVDsys_SetFile(CDVD_SourceType::Iso, ACATA::imgpath);
+					CDVDsys_ChangeSource(CDVD_SourceType::Iso);
+					Console.WriteLn(Color_Green, "ACGAME: CD media, also loading into CDVD subsystem");
 				}
 				Console.WriteLnFmt(Color_Green, "ACGAME: elf:'{}'", s_elf_override);
 				Console.WriteLnFmt(Color_Green, "ACGAME: sram:'{}'", ACSRAM::filepath);
@@ -1871,6 +1885,9 @@ void VMManager::Shutdown(bool save_resume_state)
 	FWclose();
 	FileMcd_EmuClose();
 	ACATA::TH::IO_CloseImage();
+
+	// drop the previous game's cached ATAPI mode page so a game switch gets a fresh MODE_SENSE
+	ACATAPI::Reset();
 
 	// If the fullscreen UI is running, do a hardware reset on the GS
 	// so that the texture cache and targets are all cleared.

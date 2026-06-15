@@ -26,6 +26,8 @@ static u32 atapi_dma_len = 0;
 static u8 mode_page_01[12] = {};
 static bool mode_page_01_set = false;
 
+void ACATAPI::Reset() { mode_page_01_set = false; }
+
 static void atapi_pio_write_setup(u32 len) {
     atapi_pio_write_len = len;
     atapi_pio_write_pos = 0;
@@ -196,7 +198,10 @@ void ACATAPI::handle_cmd(atapi_packet_t P) {
     case ATAPICMD::READ_10: {
         if ((!ACATA::TH::IMAGE && !ACATA::TH::isCHD) || nsec == 0) {
             if (nsec == 0) {
-                Console.Warning("ACATAPI:READ_10: zero sectors requested (LBA:%X)", transf_lba);
+                // Not an error per the ATAPI spec; CD games spam it while streaming, so log only the first few.
+                static int nsec0_count = 0;
+                if (nsec0_count++ < 3)
+                    Console.Warning("ACATAPI:READ_10: zero sectors requested (LBA:%X)", transf_lba);
             } else {
                 Console.Error("ACATAPI:READ_10: no image open");
                 ACATA::R_STATUS |= ATA_STAT_ERR;
