@@ -235,9 +235,16 @@ void DisplaySurface::handleKeyInputEvent(QEvent* event)
 			const QKeyEvent* key_event = static_cast<QKeyEvent*>(event);
 
 #ifdef _WIN32
-			// TeknoParrot: ESC exits the process immediately so the launcher can clean up.
+			// TeknoParrot: ESC triggers a clean shutdown so data (NVRAM, memcards) is saved first.
 			if (key_event->type() == QEvent::KeyPress && key_event->key() == Qt::Key_Escape)
-				ExitProcess(0);
+			{
+				if (QtHost::IsVMValid())
+					QMetaObject::invokeMethod(g_main_window, "requestShutdown", Q_ARG(bool, false),
+						Q_ARG(bool, true), Q_ARG(bool, false));
+				else
+					QMetaObject::invokeMethod(g_main_window, "requestExit", Q_ARG(bool, false));
+				return;
+			}
 #endif
 
 			// Forward text input to imgui.
