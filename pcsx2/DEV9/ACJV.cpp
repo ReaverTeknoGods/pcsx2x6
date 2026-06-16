@@ -83,7 +83,7 @@ static constexpr const std::array<InputBindingInfo, ACJV::NUM_DIP_SWITCHES> s_di
 	{s_dip_switch_info[3].toggle_bind_name, TRANSLATE_NOOP("JVS", "Toggle Video Sync Split"), nullptr, InputBindingInfo::Type::Button, 3, GenericInputBinding::Unknown},
 }};
 
-static constexpr const std::array<InputBindingInfo, 12> s_jvs_p1_button_bindings = {{
+static constexpr const std::array<InputBindingInfo, 15> s_jvs_p1_button_bindings = {{
 	{"P1_Up",      TRANSLATE_NOOP("JVS", "P1 Up"),       nullptr, InputBindingInfo::Type::Button, JVS_BTN_UP,      GenericInputBinding::DPadUp},
 	{"P1_Down",    TRANSLATE_NOOP("JVS", "P1 Down"),     nullptr, InputBindingInfo::Type::Button, JVS_BTN_DOWN,    GenericInputBinding::DPadDown},
 	{"P1_Left",    TRANSLATE_NOOP("JVS", "P1 Left"),     nullptr, InputBindingInfo::Type::Button, JVS_BTN_LEFT,    GenericInputBinding::DPadLeft},
@@ -94,11 +94,14 @@ static constexpr const std::array<InputBindingInfo, 12> s_jvs_p1_button_bindings
 	{"P1_Button4", TRANSLATE_NOOP("JVS", "P1 Button 4"), nullptr, InputBindingInfo::Type::Button, JVS_BTN_4,       GenericInputBinding::Cross},
 	{"P1_Button5", TRANSLATE_NOOP("JVS", "P1 Button 5"), nullptr, InputBindingInfo::Type::Button, JVS_BTN_5,       GenericInputBinding::Circle},
 	{"P1_Button6", TRANSLATE_NOOP("JVS", "P1 Button 6"), nullptr, InputBindingInfo::Type::Button, JVS_BTN_6,       GenericInputBinding::Unknown},
+	{"P1_Button7", TRANSLATE_NOOP("JVS", "P1 Button 7"), nullptr, InputBindingInfo::Type::Button, JVS_BTN_7,       GenericInputBinding::Unknown},
+	{"P1_Button8", TRANSLATE_NOOP("JVS", "P1 Button 8"), nullptr, InputBindingInfo::Type::Button, JVS_BTN_8,       GenericInputBinding::Unknown},
+	{"P1_Button9", TRANSLATE_NOOP("JVS", "P1 Button 9"), nullptr, InputBindingInfo::Type::Button, JVS_BTN_9,       GenericInputBinding::Unknown},
 	{"P1_Start",   TRANSLATE_NOOP("JVS", "P1 Start"),    nullptr, InputBindingInfo::Type::Button, JVS_BTN_START,   GenericInputBinding::Start},
 	{"P1_Service", TRANSLATE_NOOP("JVS", "P1 Service"),  nullptr, InputBindingInfo::Type::Button, JVS_BTN_SERVICE, GenericInputBinding::Select},
 }};
 
-static constexpr const std::array<InputBindingInfo, 12> s_jvs_p2_button_bindings = {{
+static constexpr const std::array<InputBindingInfo, 15> s_jvs_p2_button_bindings = {{
 	{"P2_Up",      TRANSLATE_NOOP("JVS", "P2 Up"),       nullptr, InputBindingInfo::Type::Button, JVS_BTN_UP,      GenericInputBinding::DPadUp},
 	{"P2_Down",    TRANSLATE_NOOP("JVS", "P2 Down"),     nullptr, InputBindingInfo::Type::Button, JVS_BTN_DOWN,    GenericInputBinding::DPadDown},
 	{"P2_Left",    TRANSLATE_NOOP("JVS", "P2 Left"),     nullptr, InputBindingInfo::Type::Button, JVS_BTN_LEFT,    GenericInputBinding::DPadLeft},
@@ -109,6 +112,9 @@ static constexpr const std::array<InputBindingInfo, 12> s_jvs_p2_button_bindings
 	{"P2_Button4", TRANSLATE_NOOP("JVS", "P2 Button 4"), nullptr, InputBindingInfo::Type::Button, JVS_BTN_4,       GenericInputBinding::Cross},
 	{"P2_Button5", TRANSLATE_NOOP("JVS", "P2 Button 5"), nullptr, InputBindingInfo::Type::Button, JVS_BTN_5,       GenericInputBinding::Circle},
 	{"P2_Button6", TRANSLATE_NOOP("JVS", "P2 Button 6"), nullptr, InputBindingInfo::Type::Button, JVS_BTN_6,       GenericInputBinding::Unknown},
+	{"P2_Button7", TRANSLATE_NOOP("JVS", "P2 Button 7"), nullptr, InputBindingInfo::Type::Button, JVS_BTN_7,       GenericInputBinding::Unknown},
+	{"P2_Button8", TRANSLATE_NOOP("JVS", "P2 Button 8"), nullptr, InputBindingInfo::Type::Button, JVS_BTN_8,       GenericInputBinding::Unknown},
+	{"P2_Button9", TRANSLATE_NOOP("JVS", "P2 Button 9"), nullptr, InputBindingInfo::Type::Button, JVS_BTN_9,       GenericInputBinding::Unknown},
 	{"P2_Start",   TRANSLATE_NOOP("JVS", "P2 Start"),    nullptr, InputBindingInfo::Type::Button, JVS_BTN_START,   GenericInputBinding::Start},
 	{"P2_Service", TRANSLATE_NOOP("JVS", "P2 Service"),  nullptr, InputBindingInfo::Type::Button, JVS_BTN_SERVICE, GenericInputBinding::Select},
 }};
@@ -124,14 +130,15 @@ static constexpr GenericInputBinding s_fighting_face_buttons[][6] = {
 	{GenericInputBinding::Square, GenericInputBinding::Cross,    GenericInputBinding::Circle,  GenericInputBinding::Triangle, GenericInputBinding::Unknown, GenericInputBinding::Unknown}, // BLOODYROAR
 };
 
-static std::array<InputBindingInfo, 12> s_active_p1_bindings;
-static std::array<InputBindingInfo, 12> s_active_p2_bindings;
+static std::array<InputBindingInfo, 15> s_active_p1_bindings;
+static std::array<InputBindingInfo, 15> s_active_p2_bindings;
 
 // Copy the base P1/P2 tables, then set the default pad button of BTN1-6 from
 // the game's layout row. Binding table indices:
 //   [0]=Up    [1]=Down  [2]=Left   [3]=Right
 //   [4]=BTN1  [5]=BTN2  [6]=BTN3   [7]=BTN4
-//   [8]=BTN5  [9]=BTN6  [10]=Start [11]=Service
+//   [8]=BTN5  [9]=BTN6  [10]=BTN7  [11]=BTN8
+//   [12]=BTN9 [13]=Start [14]=Service
 static void UpdateFightingBindings(FightingLayout layout)
 {
 	s_active_p1_bindings = s_jvs_p1_button_bindings;
@@ -986,27 +993,15 @@ static void PollTeknoParrotInput()
 
 	const auto* mem = static_cast<const u8*>(s_teknoparrot_view_ptr);
 
-	// Digital buttons: bytes directly encode JVS button bits (same bit layout as JVSButton enum).
-	// Matches the Play- fork's Iop_NamcoSys246.cpp layout exactly.
+	// Digital buttons: assign directly from the raw bytes, matching Play-'s approach of
+	// outputting control1/control1ext without any bit-by-bit decompose/recompose.
+	// This preserves ALL 16 bits including the high-byte extension bits (0x0100 etc.)
+	// that would otherwise be lost with a filtered s_all_jvs_bits loop.
 	//   +9  = P1 low  byte: START=0x80 SVC=0x40 UP=0x20 DN=0x10 L=0x08 R=0x04 BTN1=0x02 BTN2=0x01
-	//   +10 = P1 high byte: BTN3=0x80 BTN4=0x40 BTN5=0x20 BTN6=0x10
+	//   +10 = P1 high byte: BTN3=0x80 BTN4=0x40 BTN5=0x20 BTN6=0x10 EXT4=0x08 EXT3=0x04 EXT2=0x02 EXT1=0x01
 	//   +11 = P2 low byte, +12 = P2 high byte
-	static constexpr u16 s_all_jvs_bits[] = {
-		JVS_BTN_START, JVS_BTN_SERVICE, JVS_BTN_UP, JVS_BTN_DOWN,
-		JVS_BTN_LEFT, JVS_BTN_RIGHT, JVS_BTN_1, JVS_BTN_2,
-		JVS_BTN_3, JVS_BTN_4, JVS_BTN_5, JVS_BTN_6,
-	};
-	const u8 raw_bytes[JVS_PLAYER_COUNT][2] = {
-		{ mem[9],  mem[10] }, // P1: low, high
-		{ mem[11], mem[12] }, // P2: low, high
-	};
-	for (u32 player = 0; player < JVS_PLAYER_COUNT; player++)
-	{
-		const u16 raw_state = static_cast<u16>(raw_bytes[player][0]) |
-		                      (static_cast<u16>(raw_bytes[player][1]) << 8);
-		for (const u16 bit : s_all_jvs_bits)
-			ACJV::SetButtonState(player, bit, (raw_state & bit) != 0);
-	}
+	m_jvsButtonState[0] = static_cast<u16>(mem[9])  | (static_cast<u16>(mem[10]) << 8);
+	m_jvsButtonState[1] = static_cast<u16>(mem[11]) | (static_cast<u16>(mem[12]) << 8);
 
 	// Test: byte +8 bit 7, rising edge toggles TestMode DIP switch
 	const bool test_now = (mem[8] & 0x80) != 0;

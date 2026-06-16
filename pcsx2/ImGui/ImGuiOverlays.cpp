@@ -1816,12 +1816,19 @@ void ImGuiManager::RenderOverlays()
 	// In TeknoParrot lightgun mode, draw crosshairs for each active gun.
 	if (ACJV::GetMode() == JVS_MODE::LIGHTGUN)
 	{
+		// TC3, TC4, Cobra are single-player lightgun games — only draw P1 crosshair.
+		const std::string& lgGameId = ACJV::GetGameId();
+		const bool singlePlayerLightgun =
+			lgGameId == "NM00012" || // Time Crisis 3
+			lgGameId == "NM00021" || // Cobra - The Arcade
+			lgGameId == "NM00032";   // Time Crisis 4
 		const struct { u32 player; ImU32 color; } guns[] = {
 			{ 0, IM_COL32(220, 0,   0,   230) }, // P1 red
 			{ 1, IM_COL32(0,   220, 0,   230) }, // P2 green
 		};
 		for (const auto& g : guns)
 		{
+			if (singlePlayerLightgun && g.player != 0) continue;
 			const auto [nx, ny] = ACJV::GetLightgunNormalizedPosition(g.player);
 			if (nx < 0.0f || ny < 0.0f) continue;
 			const float px = nx * ImGuiManager::GetWindowWidth();

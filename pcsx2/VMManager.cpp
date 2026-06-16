@@ -29,6 +29,7 @@
 #include "PerformanceMetrics.h"
 #include "R3000A.h"
 #include "R5900.h"
+#include "MemoryTypes.h"
 #include "Recording/InputRecording.h"
 #include "Recording/InputRecordingControls.h"
 #include "SIO/Memcard/MemoryCardFile.h"
@@ -1077,10 +1078,17 @@ void VMManager::UpdateDiscDetails(bool booting)
 		else if (CDVDsys_GetSourceType() != CDVD_SourceType::NoDisc)
 		{
 			cdvdGetDiscInfo(&s_disc_serial, &s_disc_elf, &s_disc_version, &s_disc_crc, nullptr);
+			// Arcade CD games load into the CDVD subsystem but have no SYSTEM.CNF, so
+			// cdvdGetDiscInfo leaves the serial empty.  Fall back to the arcade game ID.
+			if (s_disc_serial.empty() && !s_acgame.empty())
+				s_disc_serial = ACJV::GetGameId();
 			serial_is_valid = !s_disc_serial.empty();
 		}
 		else if (!s_acgame.empty()) {
-			//s_disc_serial = Path::GetFileTitle(s_acgame);
+			// Restore serial from the game ID set by AutoDetectSource — UpdateDiscDetails moves
+			// s_disc_serial into old_serial at the top, so we must re-assign it here so that
+			// GameDB patch lookup (which uses s_disc_serial) works correctly.
+			s_disc_serial = ACJV::GetGameId();
 			title = s_title;
 			s_disc_version = {};
 			s_disc_crc = 0;
@@ -1199,6 +1207,45 @@ void VMManager::ClearDiscDetails()
 	s_disc_serial = {};
 }
 
+// Applies direct EE RAM patches from the GameDB ramPatches section for arcade games.
+// These are written directly to eeMem->Main with explicit JIT cache invalidation, mirroring
+// Play-'s ArcadeUtils::ApplyPatchesFromArcadeDefinition approach.  Called both at ELF load
+// and every VSync so that patches survive bootloader decompression of the game ELF.
+static void ApplyArcadeRamPatches()
+{
+	if (s_disc_serial.empty() || !eeMem)
+		return;
+
+	const GameDatabaseSchema::GameEntry* game = GameDatabase::findGame(s_disc_serial);
+	if (!game || game->ramPatches.empty())
+		return;
+
+	u32 applied = 0;
+	for (const auto& rp : game->ramPatches)
+	{
+		if (rp.address + 3 < Ps2MemSize::ExposedRam)
+		{
+			const u32 prev = *reinterpret_cast<u32*>(&eeMem->Main[rp.address]);
+			*reinterpret_cast<u32*>(&eeMem->Main[rp.address]) = rp.value;
+			if (Cpu)
+				Cpu->Clear(rp.address, 8);
+			if (prev != rp.value)
+			{
+				Console.WriteLn(Color_StrongGreen,
+					fmt::format("[ArcadeRAM] {:08X}: {:08X} -> {:08X}", rp.address, prev, rp.value));
+			}
+			applied++;
+		}
+		else
+		{
+			Console.Error(fmt::format("[ArcadeRAM] Patch address {:08X} out of EE RAM bounds, skipped", rp.address));
+		}
+	}
+
+	if (applied > 0)
+		DevCon.WriteLn(Color_StrongOrange, fmt::format("[ArcadeRAM] Applied {} RAM patch(es) for {}", applied, s_disc_serial));
+}
+
 void VMManager::HandleELFChange(bool verbose_patches_if_changed)
 {
 	// Classic chicken and egg problem here. We don't want to update the running game
@@ -1213,6 +1260,7 @@ void VMManager::HandleELFChange(bool verbose_patches_if_changed)
 	Console.WriteLn(Color_StrongOrange, fmt::format("ELF changed, active CRC {:08X} ({})", crc_to_report, s_elf_path));
 	Patch::ReloadPatches(s_disc_serial, crc_to_report, false, false, false, verbose_patches_if_changed);
 	ApplyCoreSettings();
+	ApplyArcadeRamPatches();
 }
 
 void VMManager::UpdateELFInfo(std::string elf_path)
@@ -1381,6 +1429,7 @@ bool VMManager::AutoDetectSource(const std::string& filename, Error* error)
 				{
 					static const std::unordered_map<std::string, std::string> s_jvsmode_defaults = {
 						{ "NM00039", "driving" }, // MotoGP
+						{ "NM00047", "driving" }, // Ace Driver 3
 					};
 					const auto it = s_jvsmode_defaults.find(s_serial);
 					if (it != s_jvsmode_defaults.end())
@@ -3092,11 +3141,38 @@ void VMManager::Internal::EntryPointCompilingOnCPUThread()
 	R5900SymbolImporter.OnElfLoadedInMemory();
 }
 
+void VMManager::Internal::SIF1DMACompletedOnCPUThread()
+{
+	ApplyArcadeRamPatches();
+}
+
 void VMManager::Internal::VSyncOnCPUThread()
 {
 	Pad::UpdateMacroButtons();
 
 	Patch::ApplyVsyncPatches();
+	ApplyArcadeRamPatches();
+
+	// One-shot EE RAM dump for arcade game analysis.  Fires once at frame 600 (~10s at 60fps)
+	// so the bootloader has finished decompressing the game ELF into RAM.
+	// Output: <game_basedir>/eeramdump.bin (32 MB raw EE RAM image, VA 0x00000000 base).
+	// Disable by removing or commenting this block once analysis is complete.
+	if (!s_acgame.empty() && eeMem && g_FrameCount == 3600)
+	{
+		const std::string dump_path = Path::Combine(Path::GetDirectory(s_acgame), "eeramdump.bin");
+		FILE* f = FileSystem::OpenCFile(dump_path.c_str(), "wb");
+		if (f)
+		{
+			std::fwrite(eeMem->Main, 1, Ps2MemSize::ExposedRam, f);
+			std::fclose(f);
+			Console.WriteLn(Color_StrongGreen,
+				fmt::format("[ArcadeRAM] EE RAM dumped ({} MB) to {}", Ps2MemSize::ExposedRam >> 20, dump_path));
+		}
+		else
+		{
+			Console.Error(fmt::format("[ArcadeRAM] Failed to open dump file for writing: {}", dump_path));
+		}
+	}
 
 	// Frame advance must be done *before* pumping messages, because otherwise
 	// we'll immediately reduce the counter we just set.

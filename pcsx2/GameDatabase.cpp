@@ -349,6 +349,19 @@ void GameDatabase::parseAndInsert(const std::string_view serial, const ryml::Nod
 		}
 	}
 
+	if (node.has_child("ramPatches") && node["ramPatches"].has_children())
+	{
+		for (const auto& n : node["ramPatches"].children())
+		{
+			GameDatabaseSchema::GameEntry::RamPatch rp{};
+			if (n.has_child("address"))
+				n["address"] >> rp.address;
+			if (n.has_child("value"))
+				n["value"] >> rp.value;
+			gameEntry.ramPatches.push_back(rp);
+		}
+	}
+
 	s_game_db.emplace(std::move(serial), std::move(gameEntry));
 }
 

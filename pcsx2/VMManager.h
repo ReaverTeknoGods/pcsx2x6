@@ -338,6 +338,7 @@ namespace VMManager
 		void EntryPointCompilingOnCPUThread();
 		void VSyncOnCPUThread();
 		void PollInputOnCPUThread();
+		void SIF1DMACompletedOnCPUThread();
 	} // namespace Internal
 } // namespace VMManager
 

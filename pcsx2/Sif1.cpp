@@ -7,6 +7,7 @@
 #include "Common.h"
 #include "Sif.h"
 #include "IopHw.h"
+#include "VMManager.h"
 
 _sif sif1;
 
@@ -312,6 +313,7 @@ __fi void  EEsif1Interrupt()
 {
 	hwDmacIrq(DMAC_SIF1);
 	sif1ch.chcr.STR = false;
+	VMManager::Internal::SIF1DMACompletedOnCPUThread();
 }
 
 // Do almost exactly the same thing as psxDma10 in IopDma.cpp.
