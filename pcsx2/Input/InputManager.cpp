@@ -246,7 +246,7 @@ std::optional<InputBindingKey> InputManager::ParseInputBindingKey(const std::str
 	{
 		for (u32 i = FIRST_EXTERNAL_INPUT_SOURCE; i < LAST_EXTERNAL_INPUT_SOURCE; i++)
 		{
-			if (s_input_sources[i]->IsInitialized())
+			if (s_input_sources[i] && s_input_sources[i]->IsInitialized())
 			{
 				std::optional<InputBindingKey> key = s_input_sources[i]->ParseKeyString(source, sub_binding);
 				if (key.has_value())
@@ -266,7 +266,7 @@ bool InputManager::ParseBindingAndGetSource(const std::string_view binding, Inpu
 
 	for (u32 i = FIRST_EXTERNAL_INPUT_SOURCE; i < LAST_EXTERNAL_INPUT_SOURCE; i++)
 	{
-		if (s_input_sources[i]->IsInitialized())
+		if (s_input_sources[i] && s_input_sources[i]->IsInitialized())
 		{
 			std::optional<InputBindingKey> parsed_key = s_input_sources[i]->ParseKeyString(source_string, sub_binding);
 			if (parsed_key.has_value())
@@ -1716,7 +1716,7 @@ bool InputManager::ReloadDevices()
 
 	for (u32 i = FIRST_EXTERNAL_INPUT_SOURCE; i < LAST_EXTERNAL_INPUT_SOURCE; i++)
 	{
-		if (s_input_sources[i]->IsInitialized())
+		if (s_input_sources[i] && s_input_sources[i]->IsInitialized())
 			changed |= s_input_sources[i]->ReloadDevices();
 	}
 
@@ -1739,7 +1739,7 @@ void InputManager::PollSources()
 {
 	for (u32 i = FIRST_EXTERNAL_INPUT_SOURCE; i < LAST_EXTERNAL_INPUT_SOURCE; i++)
 	{
-		if (s_input_sources[i]->IsInitialized())
+		if (s_input_sources[i] && s_input_sources[i]->IsInitialized())
 			s_input_sources[i]->PollEvents();
 	}
 
@@ -1759,7 +1759,7 @@ std::vector<std::pair<std::string, std::string>> InputManager::EnumerateDevices(
 
 	for (u32 i = FIRST_EXTERNAL_INPUT_SOURCE; i < LAST_EXTERNAL_INPUT_SOURCE; i++)
 	{
-		if (s_input_sources[i]->IsInitialized())
+		if (s_input_sources[i] && s_input_sources[i]->IsInitialized())
 		{
 			std::vector<std::pair<std::string, std::string>> devs(s_input_sources[i]->EnumerateDevices());
 			if (ret.empty())
@@ -1778,7 +1778,7 @@ std::vector<InputBindingKey> InputManager::EnumerateMotors()
 
 	for (u32 i = FIRST_EXTERNAL_INPUT_SOURCE; i < LAST_EXTERNAL_INPUT_SOURCE; i++)
 	{
-		if (s_input_sources[i]->IsInitialized())
+		if (s_input_sources[i] && s_input_sources[i]->IsInitialized())
 		{
 			std::vector<InputBindingKey> devs(s_input_sources[i]->EnumerateMotors());
 			if (ret.empty())
@@ -1838,7 +1838,7 @@ InputManager::GenericInputBindingMapping InputManager::GetGenericBindingMapping(
 	{
 		for (u32 i = FIRST_EXTERNAL_INPUT_SOURCE; i < LAST_EXTERNAL_INPUT_SOURCE; i++)
 		{
-			if (s_input_sources[i]->IsInitialized() && s_input_sources[i]->GetGenericBindingMapping(device, &mapping))
+			if (s_input_sources[i] && s_input_sources[i]->IsInitialized() && s_input_sources[i]->GetGenericBindingMapping(device, &mapping))
 				break;
 		}
 	}
@@ -1895,9 +1895,8 @@ void InputManager::UpdateInputSourceState(SettingsInterface& si, std::unique_loc
 
 void InputManager::ReloadSources(SettingsInterface& si, std::unique_lock<std::mutex>& settings_lock)
 {
-	UpdateInputSourceState<SDLInputSource>(si, settings_lock, InputSourceType::SDL);
-#ifdef _WIN32
-	UpdateInputSourceState<DInputSource>(si, settings_lock, InputSourceType::DInput);
-	UpdateInputSourceState<XInputSource>(si, settings_lock, InputSourceType::XInput);
-#endif
+	// All input is handled by TeknoParrot via shared memory pages.
+	// Do NOT initialize SDL, DInput, or XInput — any of them opening/polling HID devices
+	// causes DBT_DEVNODES_CHANGED feedback loops that disconnect vMulti virtual devices
+	// and break RawInput for Gunmote and similar TeknoParrot input sources.
 }

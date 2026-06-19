@@ -1430,6 +1430,14 @@ bool VMManager::AutoDetectSource(const std::string& filename, Error* error)
 					static const std::unordered_map<std::string, std::string> s_jvsmode_defaults = {
 						{ "NM00039", "driving" }, // MotoGP
 						{ "NM00047", "driving" }, // Ace Driver 3
+						{ "NM00023", "drum" }, // Taiko 7
+						{ "NM00033", "drum" }, // Taiko 8
+						{ "NM00038", "drum" }, // Taiko 9
+						{ "NM00041", "drum" }, // Taiko 10
+						{ "NM00044", "drum" }, // Taiko 11
+						{ "NM00051", "drum" }, // Taiko 12
+						{ "NM00056", "drum" }, // Taiko 13
+						{ "NM00057", "drum" }, // Taiko 14
 					};
 					const auto it = s_jvsmode_defaults.find(s_serial);
 					if (it != s_jvsmode_defaults.end())
@@ -1455,6 +1463,11 @@ bool VMManager::AutoDetectSource(const std::string& filename, Error* error)
 					{
 						ACJV::SetMode(JVS_MODE::DRIVE);
 						Console.WriteLn(Color_Green, "ACGAME: jvsmode=driving");
+					}
+					else if (jvsmode == "drum")
+					{
+						ACJV::SetMode(JVS_MODE::DRUM);
+						Console.WriteLn(Color_Green, "ACGAME: jvsmode=drum");
 					}
 					else
 						ACJV::SetMode(JVS_MODE::DEFAULT);

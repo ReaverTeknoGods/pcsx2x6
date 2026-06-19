@@ -638,7 +638,6 @@ void do_jvs_packet(const u8* input, u8* output) {
 				(*dstSize) += 12;
 			}
 			// TODO: drum games (e.g. Taiko no Tatsujin)
-#if 0
 			else if(m_jvsMode == JVS_MODE::DRUM)
 			{
 				(*output++) = 0x03;                 //Analog Input
@@ -648,7 +647,6 @@ void do_jvs_packet(const u8* input, u8* output) {
 
 				(*dstSize) += 4;
 			}
-#endif
 			// TODO: touch panel games
 #if 0
 			else if(m_jvsMode == JVS_MODE::TOUCH)
@@ -1076,7 +1074,7 @@ static void PollTeknoParrotInput()
 	{
 		// +13..+16 cover first 4 drum channels; channels 4-7 left to gamepad input
 		// (TeknoParrot typically only has 4 sensor bytes available in this range)
-		for (int i = 0; i < 4 && i < JVS_DRUM_CHANNEL_MAX; i++)
+		for (int i = 0; i < 8 && i < JVS_DRUM_CHANNEL_MAX; i++)
 			m_jvsDrumChannels[i] = static_cast<u16>(mem[13 + i]) << 6; // 0-255 → 0-0x3FC0
 	}
 }
