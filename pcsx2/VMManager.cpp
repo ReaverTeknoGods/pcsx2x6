@@ -1433,6 +1433,11 @@ bool VMManager::AutoDetectSource(const std::string& filename, Error* error)
 					static const std::unordered_map<std::string, std::string> s_jvsmode_defaults = {
 						{ "NM00039", "driving" }, // MotoGP
 						{ "NM00047", "driving" }, // Ace Driver 3
+						{ "NM00001", "driving" }, // Ridge Racer V
+						{ "NM00005", "driving" }, // Wangan Midnight R
+						{ "NM00008", "driving" }, // Wangan Midnight
+						{ "NM00010", "driving" }, // Battle Gear 3
+						{ "NM00015", "driving" }, // Battle Gear 3 Tuned
 						{ "NM00023", "drum" }, // Taiko 7
 						{ "NM00033", "drum" }, // Taiko 8
 						{ "NM00038", "drum" }, // Taiko 9

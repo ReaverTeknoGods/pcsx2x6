@@ -184,7 +184,7 @@ static void UpdateRacingBindings(RacingLayout layout)
 	if (layout == RacingLayout::BG3)
 	{
 		// BG3/Tuned: JVS switch -> function map, RE'd from the game's switch chain @0x1e3f90.
-		const auto remap = [](std::array<InputBindingInfo, 12>& b) {
+		const auto remap = [](std::array<InputBindingInfo, 15>& b) {
 			for (InputBindingInfo& e : b)
 			{
 				switch (e.bind_index)
@@ -207,7 +207,7 @@ static void UpdateRacingBindings(RacingLayout layout)
 	if (layout == RacingLayout::WANGAN)
 	{
 		// Wangan Midnight / R (NM00008/05): map confirmed live via I/O-TEST SWITCH-TEST.
-		const auto remap = [](std::array<InputBindingInfo, 12>& b) {
+		const auto remap = [](std::array<InputBindingInfo, 15>& b) {
 			for (InputBindingInfo& e : b)
 			{
 				switch (e.bind_index)
@@ -229,7 +229,7 @@ static void UpdateRacingBindings(RacingLayout layout)
 	if (layout == RacingLayout::RRV)
 	{
 		// Ridge Racer V (NM00001): map from the switch builder FUN_0022ab70 (Ghidra).
-		const auto remap = [](std::array<InputBindingInfo, 12>& b) {
+		const auto remap = [](std::array<InputBindingInfo, 15>& b) {
 			for (InputBindingInfo& e : b)
 			{
 				switch (e.bind_index)
@@ -1254,10 +1254,14 @@ static void PollTeknoParrotInput()
 	}
 	else if (m_jvsMode == JVS_MODE::DRIVE)
 	{
-		// +13=wheel, +14=gas, +15=brake; stored as high byte (×256) matching Play- output
-		m_jvsWheelChannels[0] = static_cast<u16>(mem[13]) << 8; // wheel / steering
-		m_jvsWheelChannels[1] = static_cast<u16>(mem[14]) << 8; // gas
-		m_jvsWheelChannels[2] = static_cast<u16>(mem[15]) << 8; // brake
+		// Convert raw 0-255 TP bytes to normalized floats so UpdateWheelChannels() can
+		// apply the correct per-game encoding (BG3 10-bit inverted, Wangan signed 16-bit).
+		// mem[13]=wheel (128=center), mem[14]=gas, mem[15]=brake (0=released, 255=full).
+		const float steer = (static_cast<float>(mem[13]) - 128.0f) / 127.0f;
+		m_wheelSteerR = std::max(0.0f, steer);
+		m_wheelSteerL = std::max(0.0f, -steer);
+		m_wheelGas    = static_cast<float>(mem[14]) / 255.0f;
+		m_wheelBrake  = static_cast<float>(mem[15]) / 255.0f;
 	}
 	else if (m_jvsMode == JVS_MODE::DRUM)
 	{
@@ -1318,6 +1322,12 @@ void ACJV::UpdateFcaFrame()
 {
 	if (s_gameid != "NM00001")
 		return;
+
+#ifdef _WIN32
+	// RRV never triggers do_acjv_packet (no RAYS PCB MMIO writes), so TP input is
+	// never polled through the normal path. Poll it here before reading the state.
+	PollTeknoParrotInput();
+#endif
 
 	static u16 s_fcaCounter = 0;
 	s_fcaCounter++;                            // FCA-1 heartbeat — unblocks FUN_00229af0 case 1
