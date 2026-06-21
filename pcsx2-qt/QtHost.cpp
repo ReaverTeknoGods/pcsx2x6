@@ -46,6 +46,7 @@
 #include "common/Timer.h"
 
 #include <QtCore/QTimer>
+#include <QtCore/QAbstractNativeEventFilter>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QMessageBox>
 #include <QtWidgets/QFileDialog>
@@ -2393,6 +2394,37 @@ public:
 	}
 };
 
+#ifdef _WIN32
+// Application-level filter that eats ALL WM_DEVICECHANGE messages before Qt's
+// platform plugin (QWindowsTabletSupport, QWindowsInputContext) can process them.
+// Qt's internal handlers re-enumerate HID devices in response to device change
+// notifications, which opens/closes handles to virtual HID devices (e.g. vMulti
+// used by Gunmote). For a virtual HID driver, each open/close cycle looks like a
+// device disconnect/reconnect, creating a feedback loop when running under
+// TeknoParrot. Since TeknoParrot manages all input via shared memory, PCSX2x6
+// never needs to react to OS-level device change events.
+class DeviceChangeBlocker final : public QAbstractNativeEventFilter
+{
+public:
+	bool nativeEventFilter(const QByteArray& eventType, void* message, qintptr* result) override
+	{
+		static constexpr const char win_type[] = "windows_generic_MSG";
+		if (eventType == QByteArray(win_type, sizeof(win_type) - 1))
+		{
+			const MSG* msg = static_cast<const MSG*>(message);
+			if (msg->message == WM_DEVICECHANGE)
+			{
+				if (result)
+					*result = 1;
+				return true;
+			}
+		}
+		return false;
+	}
+};
+static DeviceChangeBlocker s_device_change_blocker;
+#endif
+
 int main(int argc, char* argv[])
 {
 	CrashHandler::Install();
@@ -2408,6 +2440,12 @@ int main(int argc, char* argv[])
 	QtHost::RegisterTypes();
 
 	PCSX2MainApplication app(argc, argv);
+
+#ifdef _WIN32
+	// Install before any window is created so Qt's tablet/input context handlers
+	// never see WM_DEVICECHANGE. This prevents the vMulti feedback loop.
+	app.installNativeEventFilter(&s_device_change_blocker);
+#endif
 
 #ifndef _WIN32
 	if (!PerformEarlyHardwareChecks())

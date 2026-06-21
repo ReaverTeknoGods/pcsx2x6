@@ -2450,6 +2450,18 @@ void MainWindow::unregisterForDeviceNotifications()
 
 bool MainWindow::nativeEvent(const QByteArray& eventType, void* message, qintptr* result)
 {
+	// WM_DEVICECHANGE is handled at application level by DeviceChangeBlocker in QtHost.cpp.
+	// Belt-and-suspenders: also eat it here in case the filter missed a window-directed message.
+	static constexpr const char win_type[] = "windows_generic_MSG";
+	if (eventType == QByteArray(win_type, sizeof(win_type) - 1))
+	{
+		const MSG* msg = static_cast<const MSG*>(message);
+		if (msg->message == WM_DEVICECHANGE)
+		{
+			*result = 1;
+			return true;
+		}
+	}
 	return QMainWindow::nativeEvent(eventType, message, result);
 }
 
