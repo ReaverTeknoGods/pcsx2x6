@@ -459,6 +459,8 @@ static u16 m_coin1 = 0;
 static u16 m_coin2 = 0;
 static u16 m_jvsScreenPosX = 0;
 static u16 m_jvsScreenPosY = 0;
+static u16 m_jvsScreenPosX2 = 0; // P2 gun position (Vampire Night dual-gun games)
+static u16 m_jvsScreenPosY2 = 0;
 static float m_jvsLightgunDX = -1.0f;  // normalized display X (-1 = off-screen)
 static float m_jvsLightgunDY = -1.0f;  // normalized display Y (-1 = off-screen)
 static u16 m_jvsWheelChannels[JVS_WHEEL_CHANNEL_MAX] = {};
@@ -608,6 +610,8 @@ void ACJV::SetGameId(const std::string& gameid)
 	m_testButtonState = 0;
 	m_jvsScreenPosX = 0;
 	m_jvsScreenPosY = 0;
+	m_jvsScreenPosX2 = 0;
+	m_jvsScreenPosY2 = 0;
 	m_jvsLightgunDX = -1.0f;
 	m_jvsLightgunDY = -1.0f;
 	std::memset(m_jvsWheelChannels, 0, sizeof(m_jvsWheelChannels));
@@ -1015,7 +1019,10 @@ void do_jvs_packet(const u8* input, u8* output) {
 
 			(*output++) = JVS_CMD_SUCCESS;
 
-			// Screen position scaling depends on I/O board:
+			// JVS SCRPOSINP: 'channel' is a 1-based channel INDEX (not a count).
+			// Reply is 4 bytes (X hi, X lo, Y hi, Y lo) for the requested channel.
+			// Vampire Night polls channel=1 for P1, channel=2 for P2.
+			// Scaling depends on I/O board:
 			// - MIU-I/O (TC3): native 640x224, Y inverted (bottom-up)
 			// - RAYS PCB (TC4, Cobra, VPN): full 16-bit range 0xFFFF, Y inverted (bottom-up)
 			// pos=0 means off-screen in JVS, so on-screen values are clamped to minimum 1
@@ -1026,14 +1033,21 @@ void do_jvs_packet(const u8* input, u8* output) {
 				if (s_tp_active)
 				{
 					// TeknoParrot provides raw 0-255 stored as the high byte in
-					// m_jvsScreenPosX/Y. Output directly — no float path, no Y inversion.
-					// Matches Play-'s SCRPOSINP default: analog0 as MSB, LSB=0.
-					posX = m_jvsScreenPosX;
-					posY = m_jvsScreenPosY;
+					// m_jvsScreenPosX/Y (P1) and m_jvsScreenPosX2/Y2 (P2). Output directly.
+					if (channel >= 2)
+					{
+						posX = m_jvsScreenPosX2;
+						posY = m_jvsScreenPosY2;
+					}
+					else
+					{
+						posX = m_jvsScreenPosX;
+						posY = m_jvsScreenPosY;
+					}
 				}
 				else
 #endif
-				if (m_jvsLightgunDX >= 0.0f)
+				if (channel <= 1 && m_jvsLightgunDX >= 0.0f) // no mouse source for P2
 				{
 					const float scaleX = (ACJV::CurrentBoardID == MIU_IO_JPN_GUN_EXTENTI) ? 640.0f : 0xFFFF;
 					const float scaleY = (ACJV::CurrentBoardID == MIU_IO_JPN_GUN_EXTENTI) ? 224.0f : 0xFFFF;
@@ -1046,15 +1060,12 @@ void do_jvs_packet(const u8* input, u8* output) {
 					if (posY == 0) posY = 1;
 				}
 			}
-			for (u8 ch = 0; ch < channel; ch++)
-			{
-				(*output++) = static_cast<u8>(posX >> 8);
-				(*output++) = static_cast<u8>(posX);
-				(*output++) = static_cast<u8>(posY >> 8);
-				(*output++) = static_cast<u8>(posY);
-			}
+			(*output++) = static_cast<u8>(posX >> 8);
+			(*output++) = static_cast<u8>(posX);
+			(*output++) = static_cast<u8>(posY >> 8);
+			(*output++) = static_cast<u8>(posY);
 
-			(*dstSize) += 1 + (4 * channel);
+			(*dstSize) += 1 + 4;
 		}
 		break;
 		// GPIO output — game sends byte values to control physical outputs (e.g. gun recoil solenoids).
@@ -1244,8 +1255,10 @@ static void PollTeknoParrotInput()
 		else
 		{
 			// Default: mem[13]=P1X, mem[14]=P1Y, mem[15]=P2X, mem[16]=P2Y (Y inverted)
-			m_jvsScreenPosX = static_cast<u16>(ax) << 8;
-			m_jvsScreenPosY = static_cast<u16>(ay) << 8;
+			m_jvsScreenPosX  = static_cast<u16>(ax)      << 8;
+			m_jvsScreenPosY  = static_cast<u16>(ay)      << 8;
+			m_jvsScreenPosX2 = static_cast<u16>(mem[15]) << 8;
+			m_jvsScreenPosY2 = static_cast<u16>(mem[16]) << 8;
 			s_tp_gun_norm_x  = static_cast<float>(ax)      / 255.0f;
 			s_tp_gun_norm_y  = 1.0f - static_cast<float>(ay)      / 255.0f;
 			s_tp_gun_norm_x2 = static_cast<float>(mem[15]) / 255.0f;

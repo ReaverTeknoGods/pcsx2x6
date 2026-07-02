@@ -31,11 +31,11 @@
 #include "USB/USB.h"
 #include "VMManager.h"
 #include "DEV9/ACJV.h"
-#include "GS/Renderers/Common/GSRenderer.h"
 
 #include "common/BitUtils.h"
 #include "common/Error.h"
 #include "common/FileSystem.h"
+#include "common/Image.h"
 #include "common/Path.h"
 #include "common/Timer.h"
 
@@ -76,6 +76,73 @@ SmallString s_gpu_debug_info_line;
 SmallString s_speed_icon;
 
 constexpr ImU32 white_color = IM_COL32(255, 255, 255, 255);
+
+static constexpr std::array<const char*, 2> s_teknoparrot_crosshair_relative_paths = {
+	"TeknoParrot" FS_OSPATH_SEPARATOR_STR "crosshairs" FS_OSPATH_SEPARATOR_STR "P1.png",
+	"TeknoParrot" FS_OSPATH_SEPARATOR_STR "crosshairs" FS_OSPATH_SEPARATOR_STR "P2.png",
+};
+
+struct TeknoParrotCrosshairTexture
+{
+	bool load_attempted = false;
+	GSTexture* texture = nullptr;
+};
+static std::array<TeknoParrotCrosshairTexture, 2> s_teknoparrot_crosshair_textures;
+
+static void ResetTeknoParrotCrosshairCache()
+{
+	for (TeknoParrotCrosshairTexture& c : s_teknoparrot_crosshair_textures)
+	{
+		if (c.texture)
+		{
+			g_gs_device->Recycle(c.texture);
+			c.texture = nullptr;
+		}
+		c.load_attempted = false;
+	}
+}
+
+static bool DrawTeknoParrotCrosshairImage(u32 player, float px, float py, float scale)
+{
+	if (player >= s_teknoparrot_crosshair_textures.size())
+		return false;
+
+	TeknoParrotCrosshairTexture& c = s_teknoparrot_crosshair_textures[player];
+	if (!c.load_attempted)
+	{
+		c.load_attempted = true;
+		const std::string path =
+			Path::Combine(EmuFolders::AppRoot, s_teknoparrot_crosshair_relative_paths[player]);
+		if (FileSystem::FileExists(path.c_str()))
+		{
+			RGBA8Image image;
+			if (image.LoadFromFile(path.c_str()))
+			{
+				GSTexture* tex = g_gs_device->CreateTexture(
+					image.GetWidth(), image.GetHeight(), 1, GSTexture::Format::Color);
+				if (tex && tex->Update(GSVector4i(0, 0, image.GetWidth(), image.GetHeight()),
+								image.GetPixels(), image.GetPitch()))
+				{
+					c.texture = tex;
+				}
+				else if (tex)
+				{
+					g_gs_device->Recycle(tex);
+				}
+			}
+		}
+	}
+
+	if (!c.texture)
+		return false;
+
+	const float w = std::ceil(static_cast<float>(c.texture->GetWidth()) * scale) * 0.5f;
+	const float h = std::ceil(static_cast<float>(c.texture->GetHeight()) * scale) * 0.5f;
+	ImGui::GetForegroundDrawList()->AddImage(
+		reinterpret_cast<ImTextureID>(c.texture->GetNativeHandle()),
+		ImVec2(px - w, py - h), ImVec2(px + w, py + h));
+	return true;
+}
 
 // OSD positioning funcs
 ImVec2 CalculateOSDPosition(OsdOverlayPos position, float margin, const ImVec2& text_size, float window_width, float window_height)
@@ -1828,13 +1895,22 @@ void ImGuiManager::RenderOverlays()
 		};
 		for (const auto& g : guns)
 		{
-			if (singlePlayerLightgun && g.player != 0) continue;
+			if (singlePlayerLightgun && g.player != 0)
+				continue;
+
 			const auto [nx, ny] = ACJV::GetLightgunNormalizedPosition(g.player);
-			if (nx < 0.0f || ny < 0.0f) continue;
+			if (nx < 0.0f || ny < 0.0f)
+				continue;
+
 			const float px = nx * ImGuiManager::GetWindowWidth();
 			const float py = ny * ImGuiManager::GetWindowHeight();
+
 			if (g.player == 0)
 				InputManager::UpdatePointerAbsolutePosition(0, px, py);
+
+			if (DrawTeknoParrotCrosshairImage(g.player, px, py, scale))
+				continue;
+
 			ImDrawList* dl = ImGui::GetForegroundDrawList();
 			constexpr float arm = 18.0f;
 			constexpr float gap = 5.0f;
@@ -1852,6 +1928,10 @@ void ImGuiManager::RenderOverlays()
 			dl->AddCircleFilled({px, py}, 2.5f, outline);
 			dl->AddCircleFilled({px, py}, 1.5f, col);
 		}
+	}
+	else
+	{
+		ResetTeknoParrotCrosshairCache();
 	}
 
 	DrawSindenBorder();

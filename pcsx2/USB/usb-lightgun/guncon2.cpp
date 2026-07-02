@@ -449,6 +449,12 @@ namespace usb_lightgun
 		if (cursor_path.empty())
 			return;
 
+		// In TeknoParrot lightgun mode, ImGuiOverlays draws the crosshair from ACJV aim data.
+		// Skip guncon2's own software cursor to avoid a duplicate "phantom" cursor tracking
+		// mouse/relative-bind coordinates that don't match the TP shared-memory aim.
+		if (ACJV::GetMode() == JVS_MODE::LIGHTGUN)
+			return;
+
 		const auto& [window_x, window_y] = GetAbsolutePositionFromRelativeAxes();
 		ImGuiManager::SetSoftwareCursorPosition(GetSoftwarePointerIndex(), window_x, window_y);
 	}
@@ -519,6 +525,12 @@ namespace usb_lightgun
 		const std::string pointer_binding = USB::GetConfigString(si, s->port, TypeName(), "Pointer", "");
 		std::string cursor_path(USB::GetConfigString(si, s->port, TypeName(), "cursor_path"));
 		const float cursor_scale = USB::GetConfigFloat(si, s->port, TypeName(), "cursor_scale", 1.0f);
+
+		// In TP LIGHTGUN mode our OSD overlay draws the crosshair; suppress guncon2's own PNG cursor
+		// so we don't get a phantom copy tracking mouse-driven coordinates.
+		if (ACJV::GetMode() == JVS_MODE::LIGHTGUN)
+			cursor_path.clear();
+
 		u32 cursor_color = 0xFFFFFF;
 		if (std::string cursor_color_str(USB::GetConfigString(si, s->port, TypeName(), "cursor_color")); !cursor_color_str.empty())
 		{
