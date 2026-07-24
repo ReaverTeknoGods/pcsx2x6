@@ -15,6 +15,9 @@
 #include <QtCore/QDebug>
 #include <QtCore/QTimer>
 #include <QtGui/QGuiApplication>
+#ifdef _WIN32
+#include <Windows.h>
+#endif
 #include <QtGui/QKeyEvent>
 #include <QtGui/QResizeEvent>
 #include <QtGui/QScreen>
@@ -231,6 +234,19 @@ void DisplaySurface::handleKeyInputEvent(QEvent* event)
 		{
 			const QKeyEvent* key_event = static_cast<QKeyEvent*>(event);
 
+#ifdef _WIN32
+			// TeknoParrot: ESC triggers a clean shutdown so data (NVRAM, memcards) is saved first.
+			if (key_event->type() == QEvent::KeyPress && key_event->key() == Qt::Key_Escape)
+			{
+				if (QtHost::IsVMValid())
+					QMetaObject::invokeMethod(g_main_window, "requestShutdown", Q_ARG(bool, false),
+						Q_ARG(bool, true), Q_ARG(bool, false));
+				else
+					QMetaObject::invokeMethod(g_main_window, "requestExit", Q_ARG(bool, false));
+				return;
+			}
+#endif
+
 			// Forward text input to imgui.
 			if (ImGuiManager::WantsTextInput() && key_event->type() == QEvent::KeyPress)
 			{
@@ -269,9 +285,12 @@ void DisplaySurface::handleKeyInputEvent(QEvent* event)
 				m_keys_pressed_with_modifiers.push_back(key);
 			}
 
-			Host::RunOnCPUThread([key, pressed]() {
-				InputManager::InvokeEvents(InputManager::MakeHostKeyboardKey(key), static_cast<float>(pressed));
-			});
+			// TeknoParrot fork: keyboard events are not forwarded to InputManager.
+			// All game input comes from TeknoParrot shared memory via ACJV; keyboard hotkeys
+			// (pause, fast-forward, etc.) would accidentally fire during normal arcade play.
+			// Host::RunOnCPUThread([key, pressed]() {
+			// 	InputManager::InvokeEvents(InputManager::MakeHostKeyboardKey(key), static_cast<float>(pressed));
+			// });
 
 			return;
 		}
@@ -357,16 +376,8 @@ bool DisplaySurface::event(QEvent* event)
 				});
 			}
 
-			// don't toggle fullscreen when we're bound.. that wouldn't end well.
-			if (event->type() == QEvent::MouseButtonDblClick &&
-				static_cast<const QMouseEvent*>(event)->button() == Qt::LeftButton &&
-				QtHost::IsVMValid() && !FullscreenUI::HasActiveWindow() &&
-				((!QtHost::IsVMPaused() && !InputManager::HasAnyBindingsForKey(InputManager::MakePointerButtonKey(0, 0))) ||
-					(QtHost::IsVMPaused() && !ImGuiManager::WantsMouseInput())) &&
-				Host::GetBoolSettingValue("UI", "DoubleClickTogglesFullscreen", true))
-			{
-				g_emu_thread->toggleFullscreen();
-			}
+			// TeknoParrot: double-click-to-fullscreen disabled — interferes with lightgun/touch input.
+			// if (event->type() == QEvent::MouseButtonDblClick && ...)
 
 			return true;
 		}

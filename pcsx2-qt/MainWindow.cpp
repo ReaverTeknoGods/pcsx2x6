@@ -1296,7 +1296,8 @@ void MainWindow::updateWindowTitle()
 {
 	QString suffix(QtHost::GetAppConfigSuffix());
 	QString main_title(QtHost::GetAppNameAndVersion() + suffix);
-	QString display_title(s_current_title + suffix);
+	QString prefix = QStringLiteral("PCSX2 on TP: ");
+	QString display_title(prefix + s_current_title + suffix);
 
 	if (!s_vm_valid || s_current_title.isEmpty())
 		display_title = main_title;
@@ -2677,31 +2678,19 @@ void MainWindow::resizeEvent(QResizeEvent* event)
 
 void MainWindow::registerForDeviceNotifications()
 {
-#ifdef _WIN32
-	// We use these notifications to detect when a controller is connected or disconnected.
-	DEV_BROADCAST_DEVICEINTERFACE_W filter = {sizeof(DEV_BROADCAST_DEVICEINTERFACE_W), DBT_DEVTYP_DEVICEINTERFACE};
-	m_device_notification_handle =
-		RegisterDeviceNotificationW((HANDLE)winId(), &filter, DEVICE_NOTIFY_WINDOW_HANDLE | DEVICE_NOTIFY_ALL_INTERFACE_CLASSES);
-
-	// Set up the raw input device for mouse grabbing
-	RAWINPUTDEVICE rid;
-	rid.usUsagePage = 0x01; // Generic desktop controls
-	rid.usUsage = 0x02; // Mouse
-	rid.dwFlags = RIDEV_INPUTSINK;
-	rid.hwndTarget = (HWND)winId();
-
-	RegisterRawInputDevices(&rid, 1, sizeof(RAWINPUTDEVICE));
-#endif
+	// TeknoParrot handles all input via shared memory. No device notifications or
+	// RawInput registration needed — doing so interferes with vMulti/Gunmote.
 }
 
 void MainWindow::unregisterForDeviceNotifications()
 {
 #ifdef _WIN32
-	if (!m_device_notification_handle)
-		return;
-
-	UnregisterDeviceNotification(static_cast<HDEVNOTIFY>(m_device_notification_handle));
-	m_device_notification_handle = nullptr;
+	// Device change notifications are not registered (see registerForDeviceNotifications).
+	if (m_device_notification_handle)
+	{
+		UnregisterDeviceNotification(static_cast<HDEVNOTIFY>(m_device_notification_handle));
+		m_device_notification_handle = nullptr;
+	}
 #endif
 }
 
@@ -2709,43 +2698,18 @@ void MainWindow::unregisterForDeviceNotifications()
 
 bool MainWindow::nativeEvent(const QByteArray& eventType, void* message, qintptr* result)
 {
+	// WM_DEVICECHANGE is handled at application level by DeviceChangeBlocker in QtHost.cpp.
+	// Belt-and-suspenders: also eat it here in case the filter missed a window-directed message.
 	static constexpr const char win_type[] = "windows_generic_MSG";
 	if (eventType == QByteArray(win_type, sizeof(win_type) - 1))
 	{
 		const MSG* msg = static_cast<const MSG*>(message);
-		if (msg->message == WM_DEVICECHANGE && msg->wParam == DBT_DEVNODES_CHANGED)
+		if (msg->message == WM_DEVICECHANGE)
 		{
-			g_emu_thread->reloadInputDevices();
 			*result = 1;
 			return true;
 		}
-
-		if (msg->message == WM_INPUT)
-		{
-			UINT dwSize = 0;
-			GetRawInputData((HRAWINPUT)msg->lParam, RID_INPUT, nullptr, &dwSize, sizeof(RAWINPUTHEADER));
-
-			if (dwSize > 0)
-			{
-				std::vector<BYTE> lpb(dwSize);
-				if (GetRawInputData((HRAWINPUT)msg->lParam, RID_INPUT, lpb.data(), &dwSize, sizeof(RAWINPUTHEADER)) == dwSize)
-				{
-					const RAWINPUT* raw = reinterpret_cast<const RAWINPUT*>(lpb.data());
-					if (raw->header.dwType == RIM_TYPEMOUSE)
-					{
-						const RAWMOUSE& mouse = raw->data.mouse;
-						if (mouse.usFlags == MOUSE_MOVE_ABSOLUTE || mouse.usFlags == MOUSE_MOVE_RELATIVE)
-						{
-							POINT cursorPos;
-							if (GetCursorPos(&cursorPos))
-								checkMousePosition(cursorPos.x, cursorPos.y);
-						}
-					}
-				}
-			}
-		}
 	}
-
 	return QMainWindow::nativeEvent(eventType, message, result);
 }
 

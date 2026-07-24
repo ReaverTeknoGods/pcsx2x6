@@ -1,23 +1,24 @@
 // Microsoft Visual C++ generated resource script.
 //
 #include "svnrev.h"
+#include "tp_version.h"
 
 #define STRINGIZE2(s) #s
 #define STRINGIZE(s) STRINGIZE2(s)
 
-#define VER_FILE_DESCRIPTION_STR    "ARMSX2 PS2 Emulator"
-#define VER_FILE_VERSION            GIT_TAG_HI, GIT_TAG_MID, GIT_TAG_LO, 0
-#define VER_FILE_VERSION_STR        STRINGIZE(GIT_TAG_HI)      \
-                                    "." STRINGIZE(GIT_TAG_MID) \
-                                    "." STRINGIZE(GIT_TAG_LO)  \
-                                    "." STRINGIZE(0)
+#define VER_FILE_DESCRIPTION_STR    "PCSX2x6 SYSTEM246 Emulator"
+#define VER_FILE_VERSION            TP_VER_HI, TP_VER_MID, TP_VER_LO, TP_VER_BUILD
+#define VER_FILE_VERSION_STR        STRINGIZE(TP_VER_HI)        \
+                                    "." STRINGIZE(TP_VER_MID)   \
+                                    "." STRINGIZE(TP_VER_LO)    \
+                                    "." STRINGIZE(TP_VER_BUILD)
 
-#define VER_PRODUCTNAME_STR         "ARMSX2"
+#define VER_PRODUCTNAME_STR         "PCSX2x6"
 #define VER_PRODUCT_VERSION         VER_FILE_VERSION
 #define VER_PRODUCT_VERSION_STR     VER_FILE_VERSION_STR
 #define VER_ORIGINAL_FILENAME_STR   VER_PRODUCTNAME_STR ".exe"
 #define VER_INTERNAL_NAME_STR       VER_ORIGINAL_FILENAME_STR
-#define VER_COPYRIGHT_STR           "Copyright (C) 2024"
+#define VER_COPYRIGHT_STR           "Copyright (C) 2026"
 
 #define APSTUDIO_READONLY_SYMBOLS
 /////////////////////////////////////////////////////////////////////////////
@@ -85,20 +86,12 @@ BEGIN
         BLOCK "040904b0"
         BEGIN
             VALUE "FileDescription", VER_FILE_DESCRIPTION_STR "\0"
-#if PCSX2_isReleaseVersion == false && GIT_TAGGED_COMMIT && defined(GIT_TAG_HI)
-	        VALUE "FileVersion", STRINGIZE(GIT_TAG_HI) "." STRINGIZE(GIT_TAG_MID) "." STRINGIZE(GIT_TAG_LO) "." STRINGIZE(0) "\0"
-#else
             VALUE "FileVersion", VER_FILE_VERSION_STR "\0"
-#endif
             VALUE "InternalName", VER_INTERNAL_NAME_STR "\0"
             VALUE "LegalCopyright", VER_COPYRIGHT_STR "\0"
             VALUE "OriginalFilename", VER_ORIGINAL_FILENAME_STR "\0"
             VALUE "ProductName", VER_PRODUCTNAME_STR "\0"
-#if PCSX2_isReleaseVersion == false && GIT_TAGGED_COMMIT && defined(GIT_TAG_HI)
-		    VALUE "ProductVersion", STRINGIZE(GIT_TAG_HI) "." STRINGIZE(GIT_TAG_MID) "." STRINGIZE(GIT_TAG_LO) "." STRINGIZE(0) "\0"
-#else
             VALUE "ProductVersion", VER_PRODUCT_VERSION_STR "\0"
-#endif
         END
     END
     BLOCK "VarFileInfo"

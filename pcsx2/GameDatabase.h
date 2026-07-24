@@ -112,6 +112,16 @@ namespace GameDatabaseSchema
 		std::unordered_map<u32, std::string> patches;
 		std::vector<Patch::DynamicPatch> dynaPatches;
 
+		// Direct EE RAM patches applied at every VSync for arcade games.
+		// Unlike pnach patches, these are written directly to eeMem->Main with explicit JIT cache
+		// invalidation, matching Play-'s ArcadeUtils ApplyPatchesFromArcadeDefinition approach.
+		struct RamPatch
+		{
+			u32 address;
+			u32 value;
+		};
+		std::vector<RamPatch> ramPatches;
+
 		// Returns the list of memory card serials as a `/` delimited string
 		std::string memcardFiltersAsString() const;
 		const std::string* findPatch(u32 crc) const;

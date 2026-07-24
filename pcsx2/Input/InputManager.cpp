@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2002-2026 PCSX2 Dev Team
 // SPDX-License-Identifier: GPL-3.0+
 
+#include "DEV9/ACJV.h"
 #include "ImGui/ImGuiManager.h"
 #include "Input/InputManager.h"
 #include "Input/InputSource.h"
@@ -108,6 +109,7 @@ namespace InputManager
 	static float ApplySingleBindingScale(float sensitivity, float deadzone, float value);
 
 	static void AddHotkeyBindings(SettingsInterface& si, bool is_profile);
+	static void AddJVSBindings(SettingsInterface& si, bool is_profile);
 	static void AddPadBindings(SettingsInterface& si, u32 pad, bool is_profile);
 	static void AddUSBBindings(SettingsInterface& si, u32 port, bool is_profile);
 	static void UpdateContinuedVibration();
@@ -252,7 +254,7 @@ std::optional<InputBindingKey> InputManager::ParseInputBindingKey(const std::str
 	{
 		for (u32 i = FIRST_EXTERNAL_INPUT_SOURCE; i < LAST_EXTERNAL_INPUT_SOURCE; i++)
 		{
-			if (s_input_sources[i]->IsInitialized())
+			if (s_input_sources[i] && s_input_sources[i]->IsInitialized())
 			{
 				std::optional<InputBindingKey> key = s_input_sources[i]->ParseKeyString(source, sub_binding);
 				if (key.has_value())
@@ -272,7 +274,7 @@ bool InputManager::ParseBindingAndGetSource(const std::string_view binding, Inpu
 
 	for (u32 i = FIRST_EXTERNAL_INPUT_SOURCE; i < LAST_EXTERNAL_INPUT_SOURCE; i++)
 	{
-		if (s_input_sources[i]->IsInitialized())
+		if (s_input_sources[i] && s_input_sources[i]->IsInitialized())
 		{
 			std::optional<InputBindingKey> parsed_key = s_input_sources[i]->ParseKeyString(source_string, sub_binding);
 			if (parsed_key.has_value())
@@ -872,6 +874,103 @@ void InputManager::AddHotkeyBindings(SettingsInterface& si, bool is_profile)
 			AddBindings(bindings, InputButtonEventHandler{hotkey->handler}, InputBindingInfo::Type::Button, si, "Hotkeys", hotkey->name, is_profile);
 		}
 	}
+}
+
+void InputManager::AddJVSBindings(SettingsInterface& si, bool is_profile)
+{
+	for (const InputBindingInfo& bi : ACJV::GetDIPSwitchBindings())
+	{
+		const std::vector<std::string> bindings(si.GetStringList(ACJV::CONFIG_SECTION, bi.name));
+		if (bindings.empty())
+			continue;
+
+		AddBindings(bindings, InputButtonEventHandler{[dip_switch_index = static_cast<u32>(bi.bind_index)](s32 pressed) {
+			if (pressed > 0)
+				ACJV::ToggleDIPSwitchState(dip_switch_index);
+		}}, InputBindingInfo::Type::Button, si, ACJV::CONFIG_SECTION, bi.name, is_profile);
+	}
+
+	// P1 and P2 button bindings + auto-mirror from Pad1/Pad2
+	const std::span<const InputBindingInfo> player_bindings[] = {
+		ACJV::GetButtonBindings(),
+		ACJV::GetP2ButtonBindings(),
+	};
+
+	for (u32 player = 0; player < 2; player++)
+	{
+		for (const InputBindingInfo& bi : player_bindings[player])
+		{
+			const std::vector<std::string> bindings(si.GetStringList(ACJV::CONFIG_SECTION, bi.name));
+			if (bindings.empty())
+				continue;
+
+			AddBindings(bindings, InputAxisEventHandler{[player, mask = static_cast<u16>(bi.bind_index)](InputBindingKey key, float value) {
+				ACJV::SetButtonState(player, mask, value > 0.5f);
+			}}, bi.bind_type, si, ACJV::CONFIG_SECTION, bi.name, is_profile);
+		}
+
+		// Mirror PadN gamepad bindings to JVS player N via matching GenericInputBinding.
+		// Real S246 cabinets have no DS2 — the arcade panel wires directly to JVS.
+		// We read the user's Pad bindings and route them to JVS as the sole input path.
+		const Pad::ControllerInfo* pad_ci = Pad::GetControllerInfo(EmuConfig.Pad.Ports[player].Type);
+		if (!pad_ci)
+			continue;
+
+		const std::string pad_section = Pad::GetConfigSection(player);
+		for (const InputBindingInfo& jvs_bi : player_bindings[player])
+		{
+			if (jvs_bi.generic_mapping == GenericInputBinding::Unknown ||
+				jvs_bi.generic_mapping == GenericInputBinding::Select)
+				continue;
+
+			for (const InputBindingInfo& pad_bi : pad_ci->bindings)
+			{
+				if (pad_bi.generic_mapping != jvs_bi.generic_mapping)
+					continue;
+
+				const std::vector<std::string> pad_bindings(si.GetStringList(pad_section.c_str(), pad_bi.name));
+				for (const std::string& pb : pad_bindings)
+				{
+					AddBinding(pb, InputAxisEventHandler{[player, mask = static_cast<u16>(jvs_bi.bind_index)](InputBindingKey key, float value) {
+						ACJV::SetButtonState(player, mask, value > 0.5f);
+					}});
+				}
+				break;
+			}
+		}
+
+		// Mirror PadN Select -> Coin insert for player N
+		for (const InputBindingInfo& pad_bi : pad_ci->bindings)
+		{
+			if (pad_bi.generic_mapping != GenericInputBinding::Select)
+				continue;
+
+			const std::vector<std::string> pad_bindings(si.GetStringList(pad_section.c_str(), pad_bi.name));
+			for (const std::string& pb : pad_bindings)
+			{
+				AddBinding(pb, InputButtonEventHandler{[player](s32 pressed) {
+					if (pressed > 0)
+						ACJV::InsertCoin(player);
+				}});
+			}
+			break;
+		}
+	}
+
+	for (const InputBindingInfo& bi : ACJV::GetCoinBindings())
+	{
+		const std::vector<std::string> bindings(si.GetStringList(ACJV::CONFIG_SECTION, bi.name));
+		if (bindings.empty())
+			continue;
+
+		AddBindings(bindings, InputButtonEventHandler{[slot = static_cast<u32>(bi.bind_index)](s32 pressed) {
+			if (pressed > 0)
+				ACJV::InsertCoin(slot);
+		}}, InputBindingInfo::Type::Button, si, ACJV::CONFIG_SECTION, bi.name, is_profile);
+	}
+
+	// Wheel axis input is handled exclusively by TeknoParrot shared memory (PollTeknoParrotInput).
+	// No gamepad auto-mirror for driving axes — TP provides raw 0x00-0xFF bytes for steer/gas/brake.
 }
 
 void InputManager::AddPadBindings(SettingsInterface& si, u32 pad_index, bool is_profile)
@@ -1641,13 +1740,16 @@ void InputManager::ReloadBindings(SettingsInterface& si, SettingsInterface& bind
 	s_controller_button_generic_map.clear();
 	s_controller_axis_generic_map.clear();
 
-	// Hotkeys use the base configuration, except if the custom hotkeys option is enabled.
-	AddHotkeyBindings(hotkey_binding_si, is_hotkey_profile);
+	// TeknoParrot fork: hotkeys disabled — all input flows through JVS/TeknoParrot shared memory.
+	// Hotkeys from keyboard/gamepad would interfere with arcade games (e.g. Space=pause, Tab=fast-forward).
+	// AddHotkeyBindings(hotkey_binding_si, is_hotkey_profile);
+	AddJVSBindings(binding_si, is_binding_profile);
 
-	// If there's an input profile, we load pad bindings from it alone, rather than
-	// falling back to the base configuration.
-	for (u32 pad = 0; pad < Pad::NUM_CONTROLLER_PORTS; pad++)
-		AddPadBindings(binding_si, pad, is_binding_profile);
+	// S246/S256 cabinets have no DS2 controller — pad bindings are mirrored to JVS above.
+	// AddPadBindings is not called: the emulated DualShock2 receives no input,
+	// matching real hardware where the controller ports are empty.
+	// for (u32 pad = 0; pad < Pad::NUM_CONTROLLER_PORTS; pad++)
+	// 	AddPadBindings(binding_si, pad, is_binding_profile);
 
 	constexpr float ui_ctrl_range = 100.0f;
 	constexpr float pointer_sensitivity = 0.05f;
@@ -1700,7 +1802,7 @@ bool InputManager::ReloadDevices()
 
 	for (u32 i = FIRST_EXTERNAL_INPUT_SOURCE; i < LAST_EXTERNAL_INPUT_SOURCE; i++)
 	{
-		if (s_input_sources[i]->IsInitialized())
+		if (s_input_sources[i] && s_input_sources[i]->IsInitialized())
 			changed |= s_input_sources[i]->ReloadDevices();
 	}
 
@@ -1723,7 +1825,7 @@ void InputManager::PollSources()
 {
 	for (u32 i = FIRST_EXTERNAL_INPUT_SOURCE; i < LAST_EXTERNAL_INPUT_SOURCE; i++)
 	{
-		if (s_input_sources[i]->IsInitialized())
+		if (s_input_sources[i] && s_input_sources[i]->IsInitialized())
 			s_input_sources[i]->PollEvents();
 	}
 
@@ -1743,7 +1845,7 @@ std::vector<std::pair<std::string, std::string>> InputManager::EnumerateDevices(
 
 	for (u32 i = FIRST_EXTERNAL_INPUT_SOURCE; i < LAST_EXTERNAL_INPUT_SOURCE; i++)
 	{
-		if (s_input_sources[i]->IsInitialized())
+		if (s_input_sources[i] && s_input_sources[i]->IsInitialized())
 		{
 			std::vector<std::pair<std::string, std::string>> devs(s_input_sources[i]->EnumerateDevices());
 			if (ret.empty())
@@ -1762,7 +1864,7 @@ std::vector<InputBindingKey> InputManager::EnumerateMotors()
 
 	for (u32 i = FIRST_EXTERNAL_INPUT_SOURCE; i < LAST_EXTERNAL_INPUT_SOURCE; i++)
 	{
-		if (s_input_sources[i]->IsInitialized())
+		if (s_input_sources[i] && s_input_sources[i]->IsInitialized())
 		{
 			std::vector<InputBindingKey> devs(s_input_sources[i]->EnumerateMotors());
 			if (ret.empty())
@@ -1822,7 +1924,7 @@ InputManager::GenericInputBindingMapping InputManager::GetGenericBindingMapping(
 	{
 		for (u32 i = FIRST_EXTERNAL_INPUT_SOURCE; i < LAST_EXTERNAL_INPUT_SOURCE; i++)
 		{
-			if (s_input_sources[i]->IsInitialized() && s_input_sources[i]->GetGenericBindingMapping(device, &mapping))
+			if (s_input_sources[i] && s_input_sources[i]->IsInitialized() && s_input_sources[i]->GetGenericBindingMapping(device, &mapping))
 				break;
 		}
 	}
@@ -1879,9 +1981,8 @@ void InputManager::UpdateInputSourceState(SettingsInterface& si, std::unique_loc
 
 void InputManager::ReloadSources(SettingsInterface& si, std::unique_lock<std::mutex>& settings_lock)
 {
-	UpdateInputSourceState<SDLInputSource>(si, settings_lock, InputSourceType::SDL);
-#ifdef _WIN32
-	UpdateInputSourceState<DInputSource>(si, settings_lock, InputSourceType::DInput);
-	UpdateInputSourceState<XInputSource>(si, settings_lock, InputSourceType::XInput);
-#endif
+	// All input is handled by TeknoParrot via shared memory pages.
+	// Do NOT initialize SDL, DInput, or XInput — any of them opening/polling HID devices
+	// causes DBT_DEVNODES_CHANGED feedback loops that disconnect vMulti virtual devices
+	// and break RawInput for Gunmote and similar TeknoParrot input sources.
 }

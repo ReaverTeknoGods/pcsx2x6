@@ -30,10 +30,12 @@
 #include "SIO/Pad/PadBase.h"
 #include "USB/USB.h"
 #include "VMManager.h"
+#include "DEV9/ACJV.h"
 
 #include "common/BitUtils.h"
 #include "common/Error.h"
 #include "common/FileSystem.h"
+#include "common/Image.h"
 #include "common/Path.h"
 #include "common/Timer.h"
 
@@ -91,6 +93,73 @@ __fi static ImU32 OsdTextColor()
 	if (rgb == 0)
 		return white_color;
 	return IM_COL32((rgb >> 16) & 0xFFu, (rgb >> 8) & 0xFFu, rgb & 0xFFu, 255);
+}
+
+static constexpr std::array<const char*, 2> s_teknoparrot_crosshair_relative_paths = {
+	"TeknoParrot" FS_OSPATH_SEPARATOR_STR "crosshairs" FS_OSPATH_SEPARATOR_STR "P1.png",
+	"TeknoParrot" FS_OSPATH_SEPARATOR_STR "crosshairs" FS_OSPATH_SEPARATOR_STR "P2.png",
+};
+
+struct TeknoParrotCrosshairTexture
+{
+	bool load_attempted = false;
+	GSTexture* texture = nullptr;
+};
+static std::array<TeknoParrotCrosshairTexture, 2> s_teknoparrot_crosshair_textures;
+
+static void ResetTeknoParrotCrosshairCache()
+{
+	for (TeknoParrotCrosshairTexture& c : s_teknoparrot_crosshair_textures)
+	{
+		if (c.texture)
+		{
+			g_gs_device->Recycle(c.texture);
+			c.texture = nullptr;
+		}
+		c.load_attempted = false;
+	}
+}
+
+static bool DrawTeknoParrotCrosshairImage(u32 player, float px, float py, float scale)
+{
+	if (player >= s_teknoparrot_crosshair_textures.size())
+		return false;
+
+	TeknoParrotCrosshairTexture& c = s_teknoparrot_crosshair_textures[player];
+	if (!c.load_attempted)
+	{
+		c.load_attempted = true;
+		const std::string path =
+			Path::Combine(EmuFolders::AppRoot, s_teknoparrot_crosshair_relative_paths[player]);
+		if (FileSystem::FileExists(path.c_str()))
+		{
+			RGBA8Image image;
+			if (image.LoadFromFile(path.c_str()))
+			{
+				GSTexture* tex = g_gs_device->CreateTexture(
+					image.GetWidth(), image.GetHeight(), 1, GSTexture::Format::Color);
+				if (tex && tex->Update(GSVector4i(0, 0, image.GetWidth(), image.GetHeight()),
+								image.GetPixels(), image.GetPitch()))
+				{
+					c.texture = tex;
+				}
+				else if (tex)
+				{
+					g_gs_device->Recycle(tex);
+				}
+			}
+		}
+	}
+
+	if (!c.texture)
+		return false;
+
+	const float w = std::ceil(static_cast<float>(c.texture->GetWidth()) * scale) * 0.5f;
+	const float h = std::ceil(static_cast<float>(c.texture->GetHeight()) * scale) * 0.5f;
+	ImGui::GetForegroundDrawList()->AddImage(
+		reinterpret_cast<ImTextureID>(c.texture->GetNativeHandle()),
+		ImVec2(px - w, py - h), ImVec2(px + w, py + h));
+	return true;
 }
 
 // OSD positioning funcs
@@ -407,24 +476,7 @@ __ri void ImGuiManager::DrawPerformanceOverlay(float& position_y, float scale, f
 			}
 
 			if (GSConfig.OsdShowVersion)
-			{
-#if defined(__APPLE__) && !TARGET_OS_IPHONE
-				if (BuildVersion::GitTagHi != 0 || BuildVersion::GitTagMid != 0 || BuildVersion::GitTagLo != 0)
-				{
-					s_speed_line.append_format("{}ARMSX2-MacOS 2.1 | Core: {}.{}.{}",
-						s_speed_line.empty() ? "" : " | ", BuildVersion::GitTagHi, BuildVersion::GitTagMid, BuildVersion::GitTagLo);
-				}
-				else
-				{
-					s_speed_line.append_format("{}ARMSX2-MacOS 2.1 | Core: {}",
-						s_speed_line.empty() ? "" : " | ", BuildVersion::GitRev);
-				}
-#elif defined(__ANDROID__)
-				s_speed_line.append_format("{}ARMSX2 2.7", s_speed_line.empty() ? "" : " | ");
-#else
-				s_speed_line.append_format("{}PCSX2 {}", s_speed_line.empty() ? "" : " | ", BuildVersion::GitRev);
-#endif
-			}
+				s_speed_line.append_format("{}PCSX2x6 {}", s_speed_line.empty() ? "" : " | ", BuildVersion::GitRev);
 
 			if (!s_speed_line.empty())
 			{
@@ -1890,6 +1942,43 @@ void ImGuiManager::SetAndroidOSDVisibility(bool fps, bool vps, bool speed, bool 
 }
 #endif
 
+static void DrawSindenBorder()
+{
+	if (ACJV::GetMode() != JVS_MODE::LIGHTGUN || !ACJV::IsSindenBorderEnabled())
+		return;
+
+	const int thickness = ACJV::GetSindenBorderThickness();
+	const int mode = ACJV::GetSindenBorderMode();
+	const u32 color = IM_COL32(0xFF, 0xFF, 0xFF, 0xFF);
+
+	ImDrawList* dl = ImGui::GetForegroundDrawList();
+	float x0, y0, x1, y1;
+
+	if (mode == 0)
+	{
+		const GSVector4 rect = GSRenderer::GetLastDrawRect();
+		x0 = rect.x;
+		y0 = rect.y;
+		x1 = rect.z;
+		y1 = rect.w;
+		if (x1 <= x0 || y1 <= y0)
+			return;
+	}
+	else
+	{
+		x0 = 0.0f;
+		y0 = 0.0f;
+		x1 = ImGuiManager::GetWindowWidth();
+		y1 = ImGuiManager::GetWindowHeight();
+	}
+
+	const float t = static_cast<float>(thickness);
+	dl->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, y0 + t), color);
+	dl->AddRectFilled(ImVec2(x0, y1 - t), ImVec2(x1, y1), color);
+	dl->AddRectFilled(ImVec2(x0, y0 + t), ImVec2(x0 + t, y1 - t), color);
+	dl->AddRectFilled(ImVec2(x1 - t, y0 + t), ImVec2(x1, y1 - t), color);
+}
+
 void ImGuiManager::RenderOverlays()
 {
 	// Android: the live GSConfig can be stale — the GS device reopens whenever the
@@ -1939,6 +2028,61 @@ void ImGuiManager::RenderOverlays()
 	const float spacing = std::ceil(5.0f * scale);
 	float position_y = margin;
 
+	// In TeknoParrot lightgun mode, draw crosshairs for each active gun.
+	if (ACJV::GetMode() == JVS_MODE::LIGHTGUN)
+	{
+		// TC3, TC4, Cobra are single-player lightgun games — only draw P1 crosshair.
+		const std::string& lgGameId = ACJV::GetGameId();
+		const bool singlePlayerLightgun =
+			lgGameId == "NM00012" || // Time Crisis 3
+			lgGameId == "NM00021" || // Cobra - The Arcade
+			lgGameId == "NM00032";   // Time Crisis 4
+		const struct { u32 player; ImU32 color; } guns[] = {
+			{ 0, IM_COL32(220, 0,   0,   230) }, // P1 red
+			{ 1, IM_COL32(0,   220, 0,   230) }, // P2 green
+		};
+		for (const auto& g : guns)
+		{
+			if (singlePlayerLightgun && g.player != 0)
+				continue;
+
+			const auto [nx, ny] = ACJV::GetLightgunNormalizedPosition(g.player);
+			if (nx < 0.0f || ny < 0.0f)
+				continue;
+
+			const float px = nx * ImGuiManager::GetWindowWidth();
+			const float py = ny * ImGuiManager::GetWindowHeight();
+
+			if (g.player == 0)
+				InputManager::UpdatePointerAbsolutePosition(0, px, py);
+
+			if (DrawTeknoParrotCrosshairImage(g.player, px, py, scale))
+				continue;
+
+			ImDrawList* dl = ImGui::GetForegroundDrawList();
+			constexpr float arm = 18.0f;
+			constexpr float gap = 5.0f;
+			constexpr float thick = 2.5f;
+			const ImU32 outline = IM_COL32(0, 0, 0, 200);
+			const ImU32 col = g.color;
+			dl->AddLine({px - arm, py}, {px - gap, py}, outline, thick + 2.0f);
+			dl->AddLine({px + gap, py}, {px + arm, py}, outline, thick + 2.0f);
+			dl->AddLine({px, py - arm}, {px, py - gap}, outline, thick + 2.0f);
+			dl->AddLine({px, py + gap}, {px, py + arm}, outline, thick + 2.0f);
+			dl->AddLine({px - arm, py}, {px - gap, py}, col, thick);
+			dl->AddLine({px + gap, py}, {px + arm, py}, col, thick);
+			dl->AddLine({px, py - arm}, {px, py - gap}, col, thick);
+			dl->AddLine({px, py + gap}, {px, py + arm}, col, thick);
+			dl->AddCircleFilled({px, py}, 2.5f, outline);
+			dl->AddCircleFilled({px, py}, 1.5f, col);
+		}
+	}
+	else
+	{
+		ResetTeknoParrotCrosshairCache();
+	}
+
+	DrawSindenBorder();
 	DrawIndicatorsOverlay(position_y, scale, margin, spacing);
 	DrawVideoCaptureOverlay(position_y, scale, margin, spacing);
 	DrawInputRecordingOverlay(position_y, scale, margin, spacing);

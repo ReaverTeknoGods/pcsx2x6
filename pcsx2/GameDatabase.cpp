@@ -41,6 +41,10 @@ namespace GameDatabase
 } // namespace GameDatabase
 
 static constexpr char GAMEDB_YAML_FILE_NAME[] = "GameIndex.yaml";
+// Keep the arcade catalog separate from the canonical PS2 database. This lets
+// PCSX2x6 retain normal desktop/mobile PS2 compatibility while adding the
+// System 246/256 serials required by .acgame manifests.
+static constexpr char SYSTEM2X6_GAMEDB_YAML_FILE_NAME[] = "System2x6GameIndex.yaml";
 // ARMSX2 GameDB overrides — layered on top of upstream GameIndex.yaml after it
 // loads. Entries either add NEW serials upstream doesn't cover, or PARTIAL-
 // override existing upstream entries: scalar fields replace upstream when
@@ -375,6 +379,20 @@ void GameDatabase::populateEntry(GameDatabaseSchema::GameEntry& gameEntry, const
 		}
 	}
 
+	if (node.has_child("ramPatches") && node["ramPatches"].has_children())
+	{
+		if (is_override)
+			gameEntry.ramPatches.clear();
+		for (const auto& n : node["ramPatches"].children())
+		{
+			GameDatabaseSchema::GameEntry::RamPatch rp{};
+			if (n.has_child("address"))
+				n["address"] >> rp.address;
+			if (n.has_child("value"))
+				n["value"] >> rp.value;
+			gameEntry.ramPatches.push_back(rp);
+		}
+	}
 }
 
 void GameDatabase::parseAndInsert(const std::string_view serial, const ryml::NodeRef& node)
@@ -1132,6 +1150,10 @@ void GameDatabase::initDatabase()
 	loadFile(
 		Path::Combine(EmuFolders::Resources, GAMEDB_YAML_FILE_NAME),
 		GAMEDB_YAML_FILE_NAME,
+		/*is_override=*/false);
+	loadFile(
+		Path::Combine(EmuFolders::Resources, SYSTEM2X6_GAMEDB_YAML_FILE_NAME),
+		SYSTEM2X6_GAMEDB_YAML_FILE_NAME,
 		/*is_override=*/false);
 	loadFile(
 		Path::Combine(EmuFolders::Resources, GAMEDB_OVERRIDE_YAML_FILE_NAME),

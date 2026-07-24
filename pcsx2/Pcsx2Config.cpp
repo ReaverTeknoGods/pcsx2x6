@@ -2298,24 +2298,24 @@ bool EmuFolders::SetDataDirectory(Error* error)
 		if (EmuConfig.CustomDataPath.empty())
 		{
 #if defined(_WIN32)
-			// On Windows, use My Documents\ARMSX2.
+			// On Windows, preserve the existing PCSX2x6 data directory.
 			PWSTR documents_directory;
 			if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Documents, 0, NULL, &documents_directory)))
 			{
 				if (std::wcslen(documents_directory) > 0)
-					DataRoot = Path::Combine(StringUtil::WideStringToUTF8String(documents_directory), "ARMSX2");
+					DataRoot = Path::Combine(StringUtil::WideStringToUTF8String(documents_directory), "PCSX2x6");
 				CoTaskMemFree(documents_directory);
 			}
 #elif defined(__linux__) || defined(__FreeBSD__)
-			// Use $XDG_CONFIG_HOME/ARMSX2 if it exists.
+			// Use $XDG_CONFIG_HOME/PCSX2x6 if it exists.
 			const char* xdg_config_home = getenv("XDG_CONFIG_HOME");
 			if (xdg_config_home && Path::IsAbsolute(xdg_config_home))
 			{
-				DataRoot = Path::RealPath(Path::Combine(xdg_config_home, "ARMSX2"));
+				DataRoot = Path::RealPath(Path::Combine(xdg_config_home, "PCSX2x6"));
 			}
 			else
 			{
-				// Use ~/ARMSX2 for non-XDG, and ~/.config/ARMSX2 for XDG.
+				// Use ~/.config/PCSX2x6 for XDG-compatible desktop installs.
 				const char* home_dir = getenv("HOME");
 				if (home_dir)
 				{
@@ -2324,18 +2324,18 @@ bool EmuFolders::SetDataDirectory(Error* error)
 					if (!FileSystem::DirectoryExists(config_dir.c_str()))
 						FileSystem::CreateDirectoryPath(config_dir.c_str(), false);
 
-					DataRoot = Path::RealPath(Path::Combine(config_dir, "ARMSX2"));
+					DataRoot = Path::RealPath(Path::Combine(config_dir, "PCSX2x6"));
 				}
 			}
 #elif defined(__APPLE__)
-			static constexpr char MAC_DATA_DIR[] = "Library/Application Support/ARMSX2";
+			static constexpr char MAC_DATA_DIR[] = "Library/Application Support/PCSX2x6";
 			const char* home_dir = getenv("HOME");
 			if (home_dir)
 				DataRoot = Path::RealPath(Path::Combine(home_dir, MAC_DATA_DIR));
 #endif
 			}
 			else // Otherwise use the custom path provided by the user
-				DataRoot = Path::RealPath(Path::Combine(EmuConfig.CustomDataPath, "ARMSX2"));
+				DataRoot = Path::RealPath(Path::Combine(EmuConfig.CustomDataPath, "PCSX2x6"));
 		}
 
 	// Couldn't determine the data directory, or using portable mode? fallback to portable.
@@ -2348,7 +2348,7 @@ bool EmuFolders::SetDataDirectory(Error* error)
 		if (getenv("APPIMAGE"))
 		{
 			std::string_view appimage_path = Path::GetDirectory(getenv("APPIMAGE"));
-			DataRoot = Path::RealPath(Path::Combine(appimage_path, "ARMSX2"));
+			DataRoot = Path::RealPath(Path::Combine(appimage_path, "PCSX2x6"));
 		}
 		else
 			DataRoot = Path::Combine(AppRoot, GetPortableModePath());
