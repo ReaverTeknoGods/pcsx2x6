@@ -477,7 +477,16 @@ static bool recLoadConstPaddrMMIOShortcut(u32 bits, bool sign)
 		}
 		else
 		{
-			armAsm->Uxtw(a64::x0, a64::w0);
+			// A write to W0 already clears X0's upper 32 bits. For byte and
+			// halfword C returns, also clear the unspecified bits within W0.
+			// VIXL's Uxtw requires equal-width registers; Uxtw(x0, w0)
+			// asserts while compiling the first unsigned MMIO load.
+			switch (bits)
+			{
+				case 8:  armAsm->Uxtb(a64::w0, a64::w0); break;
+				case 16: armAsm->Uxth(a64::w0, a64::w0); break;
+				case 32: break;
+			}
 		}
 	}
 

@@ -649,6 +649,14 @@ public class NativeApp {
 	public static native void onNativeSurfaceDestroyed();
 	public static native void setDisplayRefreshRate(float hz);
 
+	/** Map the TPJ1 shared page supplied by TeknoParrotUi. Native duplicates
+	 *  the descriptor, so Java may close its ParcelFileDescriptor immediately. */
+	public static native boolean setTeknoParrotInputPageFd(int fd);
+	public static native void clearTeknoParrotInputPage();
+	public static native void setTeknoParrotOverlayButton(int button, boolean pressed);
+	public static native void setTeknoParrotOverlayAxis(int axis, float value, boolean active);
+	public static native void clearTeknoParrotOverlayInput();
+
 	public static native boolean runVMThread(String path);
 	public static native void pause();
 	public static native void resume();

@@ -14,6 +14,7 @@
 
 #include "harness/EeRecTestHarness.h"
 
+#include "Memory.h"
 #include "R5900.h"
 
 #include <gtest/gtest.h>
@@ -122,4 +123,28 @@ TEST(EeRecHarnessValidation, RecLutMapsRom2AndMirrors)
 
 	// Guard: the page just past ROM2 stays unmapped.
 	EXPECT_FALSE(recEeIsPcMapped(0x1e800000u));
+}
+
+TEST(EeRecHarnessValidation, RecLutTracksExtendedExposedRam)
+{
+	const bool old_extra_memory = memGetExtraMemMode();
+
+	// System 246/256 exposes the full 128 MiB EE RAM range. Gundam vs.
+	// Gundam executes valid code at 0x03FE8B4C, above the retail 32 MiB
+	// boundary, so both its physical page and direct mirrors must dispatch
+	// to compile-on-first-hit LUT entries.
+	memSetExtraMemMode(true);
+	recCpu.Reset();
+	EXPECT_TRUE(recEeIsPcMapped(0x03fe0000u));
+	EXPECT_TRUE(recEeIsPcMapped(0x83fe0000u));
+	EXPECT_TRUE(recEeIsPcMapped(0x07ff0000u)); // final 64 KiB page
+
+	// A later retail-PS2 boot must shrink and rebuild the LUT rather than
+	// retaining the arcade-only pages from the previous VM.
+	memSetExtraMemMode(false);
+	recCpu.Reset();
+	EXPECT_FALSE(recEeIsPcMapped(0x03fe0000u));
+
+	memSetExtraMemMode(old_extra_memory);
+	recCpu.Reset();
 }

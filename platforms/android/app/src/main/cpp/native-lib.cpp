@@ -20,6 +20,7 @@
 #include "pcsx2/VMManager.h"
 #include "pcsx2/CDVD/CDVDcommon.h"
 #include "pcsx2/CDVD/CDVD.h" // cdvdSaveNVRAM (flush BIOS NVM on background)
+#include "pcsx2/DEV9/ACJV.h"
 #include "SIO/Memcard/MemoryCardFile.h"
 #include "pcsx2/Patch.h"
 #include "pcsx2/R5900.h"
@@ -2083,17 +2084,15 @@ void Host::BeginPresentFrame() {
 
 void Host::OnGameChanged(const std::string& title, const std::string& elf_override, const std::string& disc_path,
                          const std::string& disc_serial, u32 disc_crc, u32 current_crc) {
-    // Free-software / anti-resale notice on each game boot, rendered through PCSX2's own OSD (the
-    // same message system + renderer as the FPS/stats overlay) so it reads as a native emulator
-    // pop-up rather than an Android layer drawn on top. Keyed so a re-fire just refreshes the one
-    // message. Guarded on a real game loading — OnGameChanged also fires with everything empty on
-    // shutdown/eject.
-    if (current_crc != 0 || !disc_path.empty() || !title.empty()) {
-        Host::AddKeyedOSDMessage("armsx2_free_software_notice",
-            "You are using ARMSX2, and it should not be sold, or distributed as part of any other "
-            "app. If you paid for this app, you should get your money back.",
-            10.0f);
-    }
+    // TeknoParrotUi owns the companion launch surface. Keep game boot free of
+    // frontend notices; project and dependency credits remain available in
+    // TeknoParrotUi's About view.
+    (void)title;
+    (void)elf_override;
+    (void)disc_path;
+    (void)disc_serial;
+    (void)disc_crc;
+    (void)current_crc;
 }
 
 void Host::PumpMessagesOnCPUThread() {
@@ -2212,6 +2211,48 @@ void ReportTestResults(const char* label, int passed, int total)
     env->CallStaticVoidMethod(clazz, mid, jlabel, (jint)passed, (jint)total);
     env->DeleteLocalRef(jlabel);
     env->DeleteLocalRef(clazz);
+}
+
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_kr_co_iefriends_pcsx2_NativeApp_setTeknoParrotInputPageFd(
+    JNIEnv* env, jclass clazz, jint fd)
+{
+    return ACJV::SetTeknoParrotInputPageFileDescriptor(static_cast<int>(fd)) ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C"
+JNIEXPORT void JNICALL
+Java_kr_co_iefriends_pcsx2_NativeApp_clearTeknoParrotInputPage(
+    JNIEnv* env, jclass clazz)
+{
+    ACJV::ClearTeknoParrotInputPage();
+}
+
+extern "C"
+JNIEXPORT void JNICALL
+Java_kr_co_iefriends_pcsx2_NativeApp_setTeknoParrotOverlayButton(
+    JNIEnv* env, jclass clazz, jint button, jboolean pressed)
+{
+    ACJV::SetTeknoParrotOverlayButton(
+        static_cast<u32>(button), pressed == JNI_TRUE);
+}
+
+extern "C"
+JNIEXPORT void JNICALL
+Java_kr_co_iefriends_pcsx2_NativeApp_setTeknoParrotOverlayAxis(
+    JNIEnv* env, jclass clazz, jint axis, jfloat value, jboolean active)
+{
+    ACJV::SetTeknoParrotOverlayAxis(
+        static_cast<u32>(axis), static_cast<float>(value), active == JNI_TRUE);
+}
+
+extern "C"
+JNIEXPORT void JNICALL
+Java_kr_co_iefriends_pcsx2_NativeApp_clearTeknoParrotOverlayInput(
+    JNIEnv* env, jclass clazz)
+{
+    ACJV::ClearTeknoParrotOverlayInput();
 }
 
 extern "C"

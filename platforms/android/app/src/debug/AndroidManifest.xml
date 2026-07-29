@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <application>
+        <!-- Local Gradle and .NET Android debug APKs use different generated
+             debug certificates. Keep development launches possible while the
+             action/token/path checks in MainActivityRuntime still reject the
+             removed standalone launcher and generic external intents. Release
+             builds retain the signature permission from src/main. -->
+        <activity
+            android:name=".Main"
+            tools:remove="android:permission" />
+        <receiver
+            android:name=".TeknoParrotSessionControlReceiver"
+            tools:remove="android:permission" />
+    </application>
+</manifest>

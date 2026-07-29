@@ -69,7 +69,8 @@ class EmulationMenuViewModel(application: Application) : AndroidViewModel(applic
             selectedAction = 0,
             saveSlot = MainActivityRuntime.currentSaveSlot.value,
             settings = settings,
-            touchControlsVisible = com.armsx2.ui.touch.TouchControls.visible.value,
+            touchControlsVisible =
+                com.armsx2.ui.touch.TouchControls.visibilityMode.intValue != 0,
             rumbleEnabled = ControllerMappings.rumbleEnabled(),
             multitapEnabled = ControllerMappings.multitapEnabled(),
             hardcore = runCatching { NativeApp.isHardcoreMode() }.getOrDefault(false),
@@ -299,7 +300,10 @@ class EmulationMenuViewModel(application: Application) : AndroidViewModel(applic
 
     fun toggleTouchControls() {
         val enabled = !state.value.touchControlsVisible
-        com.armsx2.ui.touch.TouchControls.visible.value = enabled
+        // This menu switch represents the persisted controls preference, not a
+        // transient visibility latch. Never (0) remains off after the menu or
+        // app is reopened; enabling restores the normal Auto mode (11).
+        com.armsx2.ui.touch.TouchControls.setVisibilityMode(if (enabled) 11 else 0)
         state.value = state.value.copy(touchControlsVisible = enabled)
     }
 

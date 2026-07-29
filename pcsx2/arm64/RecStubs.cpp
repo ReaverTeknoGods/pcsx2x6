@@ -245,7 +245,12 @@ void vtlb_DynBackpatchLoadStore(uptr code_address, u32 code_size, u32 guest_pc, 
 			}
 			else
 			{
-				armAsm->Uxtw(a64::x0, a64::w0);
+				// W-register writes zero X0's high half. Narrow C return
+				// types still need their unspecified W0 bits cleared.
+				if (size_in_bits == 8)
+					armAsm->Uxtb(a64::w0, a64::w0);
+				else if (size_in_bits == 16)
+					armAsm->Uxth(a64::w0, a64::w0);
 			}
 		}
 

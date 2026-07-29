@@ -1455,6 +1455,9 @@ bool VMManager::AutoDetectSource(const std::string& filename, Error* error)
 					if (FileSystem::FileExists(src.c_str()))
 						FileSystem::CopyFilePath(src.c_str(), dst.c_str(), true);
 					Host::SetBaseStringSettingValue("MemoryCards", "Slot1_Filename", card.c_str());
+					Host::SetBaseBoolSettingValue("MemoryCards", "Slot1_Enable", true);
+					EmuConfig.Mcd[0].Filename = card;
+					EmuConfig.Mcd[0].Enabled = true;
 				}
 				// Slot 2 (mc1:) = save card (e.g. SC2 conquest). Never overwrite existing saves.
 				if ((card = INI.GetStringValue("data", "card", "")) != "") {
@@ -1467,6 +1470,9 @@ bool VMManager::AutoDetectSource(const std::string& filename, Error* error)
 					if (FileSystem::FileExists(src.c_str()) && !FileSystem::FileExists(dst.c_str()))
 						FileSystem::CopyFilePath(src.c_str(), dst.c_str(), false);
 					Host::SetBaseStringSettingValue("MemoryCards", "Slot2_Filename", card.c_str());
+					Host::SetBaseBoolSettingValue("MemoryCards", "Slot2_Enable", true);
+					EmuConfig.Mcd[1].Filename = card;
+					EmuConfig.Mcd[1].Enabled = true;
 				}
 				/// TODOx6: Decide if we want to lock mc1 access if .ACGAME does not ask for it
 				//   Only SoulCalibur2 uses it, with the conquest card. yet many games bring a DONGLEMAN that can still access both ports

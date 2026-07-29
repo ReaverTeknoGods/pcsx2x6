@@ -61,6 +61,10 @@ Debug
 Release
 Devel
 
+# Android build-type manifests are source, not generated Debug output.
+!platforms/android/app/src/debug/
+!platforms/android/app/src/debug/AndroidManifest.xml
+
 oprofile_data/
 
 # Recording Specific Ignores (pcsx2-rr)

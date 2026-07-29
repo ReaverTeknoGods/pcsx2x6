@@ -93,7 +93,11 @@ object WindowImpl {
                     LocalDensity provides baseDensity,
                     LocalLayoutDirection provides LayoutDirection.Ltr,
                 ) {
-                    com.armsx2.ui.touch.TouchControlsOverlay()
+                    if (MainActivityRuntime.teknoParrotCompanionMode) {
+                        com.armsx2.ui.touch.TeknoParrotArcadeControlsOverlay()
+                    } else {
+                        com.armsx2.ui.touch.TouchControlsOverlay()
+                    }
                 }
 
             if (showLibrary.value && MainActivityRuntime.eState.value == EmuState.RUNNING && !overlayVisible.value) {

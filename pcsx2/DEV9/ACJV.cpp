@@ -10,10 +10,18 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cmath>
+#include <cstring>
 #include <cstdlib>
+#include <mutex>
 #include <string>
 #ifdef _WIN32
 #include "common/RedtapeWindows.h"
+#elif defined(__ANDROID__)
+#include <cerrno>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #endif
 
 enum ACJVCMD {
@@ -665,12 +673,12 @@ const GunMapping& ACJV::GetGunMapping()
 
 // Set to true once TeknoParrot shared memory is successfully mapped.
 // When active, mouse input must not override the analog values written by PollTeknoParrotInput().
-static bool s_tp_active = false;
+static std::atomic_bool s_tp_active{false};
 
 static void UpdateLightgunFromMouse()
 {
 	// TeknoParrot owns the analogs when its shared page is mapped.
-	if (s_tp_active)
+	if (s_tp_active.load(std::memory_order_acquire))
 		return;
 	const auto& [mx, my] = InputManager::GetPointerAbsolutePosition(0);
 	float dx, dy;
@@ -1029,7 +1037,7 @@ void do_jvs_packet(const u8* input, u8* output) {
 			u16 posX = 0, posY = 0;
 			if(m_jvsMode == JVS_MODE::LIGHTGUN)
 			{
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__ANDROID__)
 				if (s_tp_active)
 				{
 					// TeknoParrot provides raw 0-255 stored as the high byte in
@@ -1108,11 +1116,15 @@ void do_jvs_packet(const u8* input, u8* output) {
 }
 
 
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__ANDROID__)
 // ---------------------------------------------------------------------------
-// TeknoParrot shared memory ("TeknoParrot_JvsState", 64 bytes)
+// TeknoParrot shared input page (legacy payload at bytes 0..63)
 // Mirrors the layout used by RPCS3's usio.cpp so TeknoParrot can drive both
 // emulators with the same write-side code.
+//
+// Windows maps the historical "TeknoParrot_JvsState" named page directly.
+// Android receives a descriptor for the 4 KiB TPJ1 page from TeknoParrotUi
+// and mmap()s it; only the same first 64 bytes are consumed here.
 //
 // Byte layout:
 //   +0-7  : unused header
@@ -1136,27 +1148,72 @@ void do_jvs_packet(const u8* input, u8* output) {
 //   0x40000000 << shift: BTN3
 //   0x80000000 << shift: BTN5
 // ---------------------------------------------------------------------------
+#ifdef _WIN32
 static HANDLE s_teknoparrot_file_mapping = nullptr;
+#elif defined(__ANDROID__)
+static int s_teknoparrot_page_fd = -1;
+static constexpr size_t TEKNOPARROT_ANDROID_PAGE_SIZE = 4096;
+static std::atomic<u16> s_teknoparrot_overlay_buttons{0};
+static std::atomic<bool> s_teknoparrot_overlay_coin{false};
+static std::atomic<bool> s_teknoparrot_overlay_test{false};
+// Raw TPJ1-compatible values. -1 means that local Android input is inactive
+// and PollTeknoParrotInput must use the forwarded shared-page byte instead.
+static std::atomic<int> s_teknoparrot_overlay_steer{-1};
+static std::atomic<int> s_teknoparrot_overlay_gas{-1};
+static std::atomic<int> s_teknoparrot_overlay_brake{-1};
+// Raw TPJ1-compatible drum sensor values. Axes 3..10 in the Android bridge
+// address channels 0..7; -1 releases local ownership back to the shared page.
+static std::array<std::atomic<int>, JVS_DRUM_CHANNEL_MAX> s_teknoparrot_overlay_drum = {
+	std::atomic<int>{-1}, std::atomic<int>{-1}, std::atomic<int>{-1}, std::atomic<int>{-1},
+	std::atomic<int>{-1}, std::atomic<int>{-1}, std::atomic<int>{-1}, std::atomic<int>{-1},
+};
+#endif
 static void* s_teknoparrot_view_ptr = nullptr;
+static std::mutex s_teknoparrot_mapping_mutex;
 static bool s_tp_coin1_prev = false;
 static bool s_tp_test_prev = false;
 
 static void ShutdownTeknoParrot()
 {
+	std::lock_guard lock(s_teknoparrot_mapping_mutex);
 	if (s_teknoparrot_view_ptr)
 	{
+#ifdef _WIN32
 		UnmapViewOfFile(s_teknoparrot_view_ptr);
+#else
+		munmap(s_teknoparrot_view_ptr, TEKNOPARROT_ANDROID_PAGE_SIZE);
+#endif
 		s_teknoparrot_view_ptr = nullptr;
 	}
+#ifdef _WIN32
 	if (s_teknoparrot_file_mapping)
 	{
 		CloseHandle(s_teknoparrot_file_mapping);
 		s_teknoparrot_file_mapping = nullptr;
 	}
+#else
+	if (s_teknoparrot_page_fd >= 0)
+	{
+		close(s_teknoparrot_page_fd);
+		s_teknoparrot_page_fd = -1;
+	}
+	s_teknoparrot_overlay_buttons.store(0, std::memory_order_release);
+	s_teknoparrot_overlay_coin.store(false, std::memory_order_release);
+	s_teknoparrot_overlay_test.store(false, std::memory_order_release);
+	s_teknoparrot_overlay_steer.store(-1, std::memory_order_release);
+	s_teknoparrot_overlay_gas.store(-1, std::memory_order_release);
+	s_teknoparrot_overlay_brake.store(-1, std::memory_order_release);
+	for (auto& drum : s_teknoparrot_overlay_drum)
+		drum.store(-1, std::memory_order_release);
+#endif
+	s_tp_active.store(false, std::memory_order_release);
+	s_tp_coin1_prev = false;
+	s_tp_test_prev = false;
 }
 
 static bool InitTeknoParrot()
 {
+#ifdef _WIN32
 	if (s_teknoparrot_view_ptr)
 		return true;
 
@@ -1178,18 +1235,163 @@ static bool InitTeknoParrot()
 		return false;
 	}
 
-	s_tp_active = true;
+	s_tp_active.store(true, std::memory_order_release);
 	std::atexit(ShutdownTeknoParrot);
 	Console.WriteLn("ACJV: TeknoParrot_JvsState shared memory initialized");
 	return true;
+#else
+	std::lock_guard lock(s_teknoparrot_mapping_mutex);
+	return s_teknoparrot_view_ptr != nullptr;
+#endif
 }
+
+#ifdef __ANDROID__
+bool ACJV::SetTeknoParrotInputPageFileDescriptor(int fd)
+{
+	if (fd < 0)
+	{
+		Console.Error("ACJV: rejected invalid TeknoParrot input page descriptor");
+		return false;
+	}
+
+	const int owned_fd = dup(fd);
+	if (owned_fd < 0)
+	{
+		Console.Error("ACJV: failed to duplicate TeknoParrot input page descriptor: errno=%d", errno);
+		return false;
+	}
+
+	struct stat info = {};
+	if (fstat(owned_fd, &info) != 0 || info.st_size < 64)
+	{
+		Console.Error("ACJV: TeknoParrot input page is smaller than the 64-byte legacy payload");
+		close(owned_fd);
+		return false;
+	}
+
+	void* const view = mmap(nullptr, TEKNOPARROT_ANDROID_PAGE_SIZE, PROT_READ, MAP_SHARED, owned_fd, 0);
+	if (view == MAP_FAILED)
+	{
+		Console.Error("ACJV: failed to mmap TeknoParrot input page: errno=%d", errno);
+		close(owned_fd);
+		return false;
+	}
+
+	{
+		std::lock_guard lock(s_teknoparrot_mapping_mutex);
+		if (s_teknoparrot_view_ptr)
+			munmap(s_teknoparrot_view_ptr, TEKNOPARROT_ANDROID_PAGE_SIZE);
+		if (s_teknoparrot_page_fd >= 0)
+			close(s_teknoparrot_page_fd);
+		s_teknoparrot_view_ptr = view;
+		s_teknoparrot_page_fd = owned_fd;
+		s_tp_coin1_prev = false;
+		s_tp_test_prev = false;
+		s_tp_active.store(true, std::memory_order_release);
+	}
+
+	Console.WriteLn("ACJV: Android TeknoParrot input page mapped (fd=%d)", owned_fd);
+	return true;
+}
+
+void ACJV::ClearTeknoParrotInputPage()
+{
+	ShutdownTeknoParrot();
+	Console.WriteLn("ACJV: Android TeknoParrot input page cleared");
+}
+
+void ACJV::SetTeknoParrotOverlayButton(u32 button, bool pressed)
+{
+	u16 mask = 0;
+	switch (button)
+	{
+		case 0:
+			s_teknoparrot_overlay_coin.store(pressed, std::memory_order_release);
+			return;
+		case 1: mask = JVS_BTN_START; break;
+		case 2: mask = JVS_BTN_UP; break;
+		case 3: mask = JVS_BTN_DOWN; break;
+		case 4: mask = JVS_BTN_LEFT; break;
+		case 5: mask = JVS_BTN_RIGHT; break;
+		case 6: mask = JVS_BTN_1; break;
+		case 7: mask = JVS_BTN_2; break;
+		case 8: mask = JVS_BTN_3; break;
+		case 9: mask = JVS_BTN_4; break;
+		case 10: mask = JVS_BTN_5; break;
+		case 11: mask = JVS_BTN_6; break;
+		case 12: mask = JVS_BTN_SERVICE; break;
+		case 13:
+			s_teknoparrot_overlay_test.store(pressed, std::memory_order_release);
+			return;
+		case 14: mask = JVS_BTN_7; break;
+		case 15: mask = JVS_BTN_8; break;
+		case 16: mask = JVS_BTN_9; break;
+		default:
+			return;
+	}
+
+	if (pressed)
+		s_teknoparrot_overlay_buttons.fetch_or(mask, std::memory_order_acq_rel);
+	else
+		s_teknoparrot_overlay_buttons.fetch_and(static_cast<u16>(~mask), std::memory_order_acq_rel);
+}
+
+void ACJV::ClearTeknoParrotOverlayInput()
+{
+	s_teknoparrot_overlay_buttons.store(0, std::memory_order_release);
+	s_teknoparrot_overlay_coin.store(false, std::memory_order_release);
+	s_teknoparrot_overlay_test.store(false, std::memory_order_release);
+	s_teknoparrot_overlay_steer.store(-1, std::memory_order_release);
+	s_teknoparrot_overlay_gas.store(-1, std::memory_order_release);
+	s_teknoparrot_overlay_brake.store(-1, std::memory_order_release);
+	for (auto& drum : s_teknoparrot_overlay_drum)
+		drum.store(-1, std::memory_order_release);
+}
+
+void ACJV::SetTeknoParrotOverlayAxis(u32 axis, float value, bool active)
+{
+	std::atomic<int>* target = nullptr;
+	switch (axis)
+	{
+		case 0: target = &s_teknoparrot_overlay_steer; break;
+		case 1: target = &s_teknoparrot_overlay_gas; break;
+		case 2: target = &s_teknoparrot_overlay_brake; break;
+		default:
+			if (axis >= 3 && axis < 3 + JVS_DRUM_CHANNEL_MAX)
+				target = &s_teknoparrot_overlay_drum[axis - 3];
+			else
+				return;
+			break;
+	}
+
+	if (!active)
+	{
+		target->store(-1, std::memory_order_release);
+		return;
+	}
+
+	const float normalized = (axis == 0)
+		? (std::clamp(value, -1.0f, 1.0f) * 0.5f + 0.5f)
+		: std::clamp(value, 0.0f, 1.0f);
+	target->store(static_cast<int>(std::lround(normalized * 255.0f)), std::memory_order_release);
+}
+#endif
 
 static void PollTeknoParrotInput()
 {
 	if (!InitTeknoParrot())
 		return;
 
-	const auto* mem = static_cast<const u8*>(s_teknoparrot_view_ptr);
+	// Snapshot the legacy region so a concurrent TPUI update cannot mix two
+	// frames, and so replacing/clearing the mmap never races a JVS read.
+	std::array<u8, 64> input_snapshot;
+	{
+		std::lock_guard lock(s_teknoparrot_mapping_mutex);
+		if (!s_teknoparrot_view_ptr)
+			return;
+		std::memcpy(input_snapshot.data(), s_teknoparrot_view_ptr, input_snapshot.size());
+	}
+	const u8* const mem = input_snapshot.data();
 
 	// Digital buttons: assign directly from the raw bytes, matching Play-'s approach of
 	// outputting control1/control1ext without any bit-by-bit decompose/recompose.
@@ -1200,16 +1402,27 @@ static void PollTeknoParrotInput()
 	//   +11 = P2 low byte, +12 = P2 high byte
 	m_jvsButtonState[0] = static_cast<u16>(mem[9])  | (static_cast<u16>(mem[10]) << 8);
 	m_jvsButtonState[1] = static_cast<u16>(mem[11]) | (static_cast<u16>(mem[12]) << 8);
+#ifdef __ANDROID__
+	m_jvsButtonState[0] |= s_teknoparrot_overlay_buttons.load(std::memory_order_acquire);
+#endif
 
 	// Test: byte +8 bit 7, rising edge toggles TestMode DIP switch
-	const bool test_now = (mem[8] & 0x80) != 0;
+	const bool test_now = (mem[8] & 0x80) != 0
+#ifdef __ANDROID__
+		|| s_teknoparrot_overlay_test.load(std::memory_order_acquire)
+#endif
+		;
 	if (test_now && !s_tp_test_prev)
 		ACJV::ToggleDIPSwitchState(0); // index 0 = TestMode
 	s_tp_test_prev = test_now;
 
 	// Coin: byte +32, rising edge inserts a coin for both slots (matching Play- behaviour
 	// where slotCount==2 means both counters are incremented on a single coin pulse)
-	const bool coin_now = mem[32] != 0;
+	const bool coin_now = mem[32] != 0
+#ifdef __ANDROID__
+		|| s_teknoparrot_overlay_coin.load(std::memory_order_acquire)
+#endif
+		;
 	if (coin_now && !s_tp_coin1_prev)
 	{
 		ACJV::InsertCoin(0);
@@ -1223,7 +1436,32 @@ static void PollTeknoParrotInput()
 	{
 		const u8 ax = mem[13]; // raw byte from TP (axis meaning varies by game)
 		const u8 ay = mem[14]; // raw byte from TP (axis meaning varies by game)
-		if (s_gameid == "NM00021" || s_gameid == "NM00032") // cobrata / cobrataw / TC4
+		const int local_gun_x = s_teknoparrot_overlay_steer.load(std::memory_order_acquire);
+		const int local_gun_y = s_teknoparrot_overlay_gas.load(std::memory_order_acquire);
+		if (local_gun_x >= 0 && local_gun_y >= 0)
+		{
+			const float gun_x = static_cast<float>(local_gun_x) / 255.0f;
+			const float gun_y = static_cast<float>(local_gun_y) / 255.0f;
+			// TC4's cabinet screen-position X runs opposite to the Android
+			// touch surface. Cobra uses the normal direction, so keep this
+			// correction strictly title-scoped.
+			const float game_gun_x = (s_gameid == "NM00032") ? (1.0f - gun_x) : gun_x;
+			if (s_gameid == "NM00012")
+			{
+				m_jvsScreenPosX = static_cast<u16>(game_gun_x * 660.0f + 16053.0f);
+				m_jvsScreenPosY = static_cast<u16>(gun_y * 220.0f + 16273.0f);
+			}
+			else
+			{
+				m_jvsScreenPosX = static_cast<u16>(game_gun_x * 65535.0f);
+				m_jvsScreenPosY = static_cast<u16>(gun_y * 65535.0f);
+			}
+			s_tp_gun_norm_x = game_gun_x;
+			s_tp_gun_norm_y = gun_y;
+			s_tp_gun_norm_x2 = -1.0f;
+			s_tp_gun_norm_y2 = -1.0f;
+		}
+		else if (s_gameid == "NM00021" || s_gameid == "NM00032") // cobrata / cobrataw / TC4
 		{
 			// analog0 = mem[13] → Y axis, bitwise-inverted
 			// analog2 = mem[14] → X axis
@@ -1270,21 +1508,32 @@ static void PollTeknoParrotInput()
 		// Convert raw 0-255 TP bytes to normalized floats so UpdateWheelChannels() can
 		// apply the correct per-game encoding (BG3 10-bit inverted, Wangan signed 16-bit).
 		// mem[13]=wheel (128=center), mem[14]=gas, mem[15]=brake (0=released, 255=full).
-		const float steer = (static_cast<float>(mem[13]) - 128.0f) / 127.0f;
+		const int local_steer = s_teknoparrot_overlay_steer.load(std::memory_order_acquire);
+		const int local_gas = s_teknoparrot_overlay_gas.load(std::memory_order_acquire);
+		const int local_brake = s_teknoparrot_overlay_brake.load(std::memory_order_acquire);
+		const u8 steer_raw = static_cast<u8>(local_steer >= 0 ? local_steer : mem[13]);
+		const u8 gas_raw = static_cast<u8>(local_gas >= 0 ? local_gas : mem[14]);
+		const u8 brake_raw = static_cast<u8>(local_brake >= 0 ? local_brake : mem[15]);
+		const float steer = (static_cast<float>(steer_raw) - 128.0f) / 127.0f;
 		m_wheelSteerR = std::max(0.0f, steer);
 		m_wheelSteerL = std::max(0.0f, -steer);
-		m_wheelGas    = static_cast<float>(mem[14]) / 255.0f;
-		m_wheelBrake  = static_cast<float>(mem[15]) / 255.0f;
+		m_wheelGas    = static_cast<float>(gas_raw) / 255.0f;
+		m_wheelBrake  = static_cast<float>(brake_raw) / 255.0f;
 	}
 	else if (m_jvsMode == JVS_MODE::DRUM)
 	{
-		// +13..+16 cover first 4 drum channels; channels 4-7 left to gamepad input
-		// (TeknoParrot typically only has 4 sensor bytes available in this range)
-		for (int i = 0; i < 8 && i < JVS_DRUM_CHANNEL_MAX; i++)
-			m_jvsDrumChannels[i] = static_cast<u16>(mem[13 + i]) << 6; // 0-255 → 0-0x3FC0
+		// +13..+20 are the eight TPUI drum sensor bytes. A locally active Android
+		// touch/controller axis owns only its channel; releasing it falls back to
+		// the shared page so concurrent TPUI forwarding remains usable.
+		for (int i = 0; i < JVS_DRUM_CHANNEL_MAX; i++)
+		{
+			const int local = s_teknoparrot_overlay_drum[i].load(std::memory_order_acquire);
+			const u8 raw = static_cast<u8>(local >= 0 ? local : mem[13 + i]);
+			m_jvsDrumChannels[i] = static_cast<u16>(raw) << 6; // 0-255 → 0-0x3FC0
+		}
 	}
 }
-#endif // _WIN32
+#endif // _WIN32 || __ANDROID__
 
 // based on https://github.com/search?q=repo%3Ajpd002/Play-%20CSys246%3A%3AProcessJvsPacket&type=code by Jean-Philip Desjardins
 // Prime the JVS board firmware-version register when ACJV starts (BG3 Tuned polls it before any command).
@@ -1293,7 +1542,7 @@ void ACJV::OnBoardStart() {
 }
 
 void do_acjv_packet() {
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__ANDROID__)
 	PollTeknoParrotInput();
 #endif
 	const u16* wr16 = wrbuf_getu16();
@@ -1343,7 +1592,7 @@ void ACJV::UpdateFcaFrame()
 	if (s_gameid != "NM00001")
 		return;
 
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__ANDROID__)
 	// RRV never triggers do_acjv_packet (no RAYS PCB MMIO writes), so TP input is
 	// never polled through the normal path. Poll it here before reading the state.
 	PollTeknoParrotInput();

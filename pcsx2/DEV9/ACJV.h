@@ -133,6 +133,26 @@ namespace ACJV {
     const std::string& GetGameId();
     const GunMapping& GetGunMapping();
 
+#ifdef __ANDROID__
+    // Android cannot open Win32 named shared memory. TeknoParrotUi passes a
+    // descriptor for its TPJ1 page instead; the legacy JVS payload remains at
+    // bytes 0..63 so the existing Windows mappings stay byte-for-byte compatible.
+    bool SetTeknoParrotInputPageFileDescriptor(int fd);
+    void ClearTeknoParrotInputPage();
+
+    // The Android companion's arcade touch surface is another TPJ1 producer.
+    // Keep its transient button state separate and merge it with the shared page
+    // while polling, so touch and TPUI-forwarded physical controllers can be used
+    // at the same time without either producer overwriting the other.
+    void SetTeknoParrotOverlayButton(u32 button, bool pressed);
+    // Logical driving axes: 0=steer (-1..1), 1=gas (0..1), 2=brake (0..1).
+    // Drum axes 3..10 address TPJ1 analog channels 0..7 with values 0..1.
+    // An inactive axis falls back to the TPJ1 page, allowing TPUI forwarding,
+    // local touch, and an Android physical controller to share one JVS path.
+    void SetTeknoParrotOverlayAxis(u32 axis, float value, bool active);
+    void ClearTeknoParrotOverlayInput();
+#endif
+
     bool IsSindenBorderEnabled();
     int GetSindenBorderMode();
     int GetSindenBorderThickness();

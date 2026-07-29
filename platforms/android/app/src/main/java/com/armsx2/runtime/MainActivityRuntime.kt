@@ -32,7 +32,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Text
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -132,8 +134,38 @@ open class MainActivityRuntime : ComponentActivity() {
     private var libraryAxisY = 0
 
     companion object {
+        const val ACTION_TEKNOPARROT_LAUNCH_GAME =
+            "com.teknoparrot.pcsx2x6.action.LAUNCH_GAME"
+        const val ACTION_TEKNOPARROT_STOP_GAME =
+            "com.teknoparrot.pcsx2x6.action.STOP_GAME"
+        const val ACTION_TEKNOPARROT_QUERY_SESSION =
+            "com.teknoparrot.pcsx2x6.action.QUERY_SESSION"
+        const val ACTION_TEKNOPARROT_SESSION_STATUS =
+            "com.teknoparrot.pcsx2x6.action.SESSION_STATUS"
+        const val EXTRA_TEKNOPARROT_GAME_PATH =
+            "com.teknoparrot.pcsx2x6.extra.GAME_PATH"
+        const val EXTRA_TEKNOPARROT_PROFILE_NAME =
+            "com.teknoparrot.pcsx2x6.extra.PROFILE_NAME"
+        const val EXTRA_TEKNOPARROT_INPUT_PAGE_PATH =
+            "com.teknoparrot.pcsx2x6.extra.INPUT_PAGE_PATH"
+        const val EXTRA_TEKNOPARROT_CALLBACK_PACKAGE =
+            "com.teknoparrot.pcsx2x6.extra.CALLBACK_PACKAGE"
+        const val EXTRA_TEKNOPARROT_SESSION_TOKEN =
+            "com.teknoparrot.pcsx2x6.extra.SESSION_TOKEN"
+        const val EXTRA_TEKNOPARROT_SESSION_STATUS =
+            "com.teknoparrot.pcsx2x6.extra.SESSION_STATUS"
+
         var instance: MainActivityRuntime? = null
         lateinit var prefs: SharedPreferences
+        @Volatile var teknoParrotCompanionMode = false
+        @Volatile private var teknoParrotCallbackPackage = ""
+        @Volatile private var teknoParrotSessionToken = ""
+        @Volatile private var teknoParrotSessionStatus = "stopped"
+        // These are observed by the companion arcade overlay. A plain volatile
+        // string updated the native session but left Compose showing the prior
+        // game's controls after an in-process TPUI game switch.
+        var teknoParrotGameId by mutableStateOf("")
+        var teknoParrotProfileName by mutableStateOf("")
         val setupComplete = mutableStateOf(false)
         // Set at launch when a restored-but-unusable setup is detected (Auto Backup
         // brought back prefs incl. setupComplete, but the ROMs folder permission
@@ -457,7 +489,7 @@ open class MainActivityRuntime : ComponentActivity() {
          *  finish the Activity back to the launcher/frontend AFTER the VM has fully
          *  unwound and flushed (memcards/savestate). Marshalled to the UI thread. */
         private fun finishToLauncherIfRequested() {
-            if (quitAfterStop) {
+            if (quitAfterStop || (teknoParrotCompanionMode && launchedExternally)) {
                 quitAfterStop = false
                 instance?.runOnUiThread { instance?.finishAndRemoveTask() }
             }
@@ -511,6 +543,7 @@ open class MainActivityRuntime : ComponentActivity() {
                 try {
                     eState.value = EmuState.RUNNING
                     println("@@ANDROID_START_VM@@ kind=game path=${m_szGamefile.take(240)}")
+                    publishTeknoParrotSessionStatus("running")
                     // Local co-op: re-pair controllers each session (first pad = P1,
                     // next = P2) so player slots are deterministic per boot.
                     com.armsx2.input.PadRouter.reset()
@@ -538,10 +571,110 @@ open class MainActivityRuntime : ComponentActivity() {
                     if (restartNow) {
                         start()
                     } else {
+                        publishTeknoParrotSessionStatus("stopped")
                         WindowImpl.toolbarVisible.value = true
                         WindowImpl.showLibrary.value = false
                         WindowImpl.overlayVisible.value = false
                         finishToLauncherIfRequested()
+                    }
+                }
+            }
+        }
+
+        private fun publishTeknoParrotSessionStatus(status: String) {
+            teknoParrotSessionStatus = status
+            val callbackPackage = teknoParrotCallbackPackage
+            val token = teknoParrotSessionToken
+            val context = instance?.applicationContext
+            if (context == null || callbackPackage != "com.teknoparrot.ui" || token.isBlank())
+                return
+
+            sendTeknoParrotSessionStatus(
+                context,
+                callbackPackage,
+                token,
+                status,
+                teknoParrotProfileName,
+                teknoParrotGameId,
+            )
+        }
+
+        private fun sendTeknoParrotSessionStatus(
+            context: Context,
+            callbackPackage: String,
+            token: String,
+            status: String,
+            profileName: String,
+            gameId: String,
+        ) {
+            runCatching {
+                context.sendBroadcast(
+                    Intent(ACTION_TEKNOPARROT_SESSION_STATUS)
+                        .setPackage(callbackPackage)
+                        .putExtra(EXTRA_TEKNOPARROT_SESSION_TOKEN, token)
+                        .putExtra(EXTRA_TEKNOPARROT_SESSION_STATUS, status)
+                        .putExtra(EXTRA_TEKNOPARROT_PROFILE_NAME, profileName)
+                        .putExtra("com.teknoparrot.pcsx2x6.extra.GAME_ID", gameId)
+                )
+                println(
+                    "@@TPUI_SESSION_STATUS@@ status=$status " +
+                        "gameId=${gameId.take(32)}"
+                )
+            }.onFailure {
+                println("@@TPUI_SESSION_STATUS_FAILED@@ status=$status error=${it.message}")
+            }
+        }
+
+        /**
+         * Exported receiver entry point for TPUI's durable foreground service.
+         * The unguessable per-session token prevents another app from stopping
+         * a player's game. A query received after process death safely answers
+         * stopped so TPUI can retire a stale restart record.
+         */
+        @JvmStatic
+        fun handleTeknoParrotSessionControl(context: Context, intent: Intent?) {
+            val callbackPackage =
+                intent?.getStringExtra(EXTRA_TEKNOPARROT_CALLBACK_PACKAGE)
+                    ?.takeIf { it == "com.teknoparrot.ui" }
+                    ?: return
+            val token = intent.getStringExtra(EXTRA_TEKNOPARROT_SESSION_TOKEN)
+                ?.takeIf {
+                    it.length in 32..128 &&
+                        it.all { character ->
+                            character.isLetterOrDigit() || character == '-' || character == '_'
+                        }
+                }
+                ?: return
+            val ownsActiveSession =
+                teknoParrotCompanionMode && token == teknoParrotSessionToken
+
+            when (intent.action) {
+                ACTION_TEKNOPARROT_QUERY_SESSION -> {
+                    sendTeknoParrotSessionStatus(
+                        context.applicationContext,
+                        callbackPackage,
+                        token,
+                        if (ownsActiveSession) teknoParrotSessionStatus else "stopped",
+                        if (ownsActiveSession) teknoParrotProfileName else "",
+                        if (ownsActiveSession) teknoParrotGameId else "",
+                    )
+                }
+
+                ACTION_TEKNOPARROT_STOP_GAME -> {
+                    val activity = instance
+                    if (ownsActiveSession && activity != null) {
+                        activity.runOnUiThread {
+                            activity.handleTeknoParrotStopIntent(intent)
+                        }
+                    } else {
+                        sendTeknoParrotSessionStatus(
+                            context.applicationContext,
+                            callbackPackage,
+                            token,
+                            "stopped",
+                            "",
+                            "",
+                        )
                     }
                 }
             }
@@ -587,6 +720,18 @@ open class MainActivityRuntime : ComponentActivity() {
             // serial-less ELF/homebrew) so ELF per-game settings survive a reboot
             // instead of falling back to global (issue #253).
             var resolved = com.armsx2.config.ConfigStore.resolveForGame(currentGame.value?.settingsKey)
+            // Soul Calibur II reaches attract correctly with Vulkan on the Galaxy S26 Ultra,
+            // but Adreno's Vulkan driver blocks forever in vkGetQueryPoolResults at the
+            // versus transition. OpenGL completes the same coin/start/select path and enters
+            // live gameplay. Keep the workaround confined to TPUI arcade launches so ordinary
+            // ARMSX2 users retain their per-game renderer choice and desktop builds are untouched.
+            val arcadeSettingsKey = currentGame.value?.settingsKey
+            if (teknoParrotCompanionMode &&
+                (currentGame.value?.serial.equals("NM00007", ignoreCase = true) ||
+                    arcadeSettingsKey.equals("NM00007", ignoreCase = true))) {
+                resolved = resolved.copy(renderer = "opengl")
+                println("@@ANDROID_TITLE_RENDERER_OVERRIDE@@ serial=NM00007 renderer=opengl reason=adreno_vulkan_query_hang")
+            }
             // Build immutable input maps before the VM starts so the first ABXY
             // edge never pays SharedPreferences parsing on the UI thread.
             ControllerMappings.warmRuntimeCaches()
@@ -1484,6 +1629,160 @@ open class MainActivityRuntime : ComponentActivity() {
      *  captures without manually tapping the BIOS card. */
     private var autoBootBiosFired = false
 
+    private fun teknoParrotDataRoot(): File {
+        val externalRoot =
+            applicationContext.getExternalFilesDir(null) ?: applicationContext.dataDir
+        return File(externalRoot, "TeknoParrot").apply { mkdirs() }
+    }
+
+    private fun isTeknoParrotLaunchIntent(candidate: Intent?): Boolean {
+        if (candidate?.action != ACTION_TEKNOPARROT_LAUNCH_GAME)
+            return false
+        if (candidate.getStringExtra(EXTRA_TEKNOPARROT_CALLBACK_PACKAGE) != "com.teknoparrot.ui")
+            return false
+        val token = candidate.getStringExtra(EXTRA_TEKNOPARROT_SESSION_TOKEN).orEmpty()
+        if (token.length !in 32..128 ||
+            token.any { !it.isLetterOrDigit() && it != '-' && it != '_' }
+        )
+            return false
+
+        val manifest = runCatching {
+            File(candidate.getStringExtra(EXTRA_TEKNOPARROT_GAME_PATH).orEmpty()).canonicalFile
+        }.getOrNull() ?: return false
+        val gameRoot = File(teknoParrotDataRoot(), "games").canonicalFile
+        return manifest.isFile &&
+            manifest.extension.equals("acgame", ignoreCase = true) &&
+            manifest.path.startsWith(gameRoot.path + File.separator)
+    }
+
+    /**
+     * Configure the app-private PCSX2X6 root for a direct TeknoParrotUi
+     * companion launch. This deliberately bypasses ARMSX2's onboarding and
+     * library selection: TPUI owns game discovery, configuration and launch.
+     */
+    private fun configureTeknoParrotCompanion(intent: Intent?): Boolean {
+        val launchIntent = intent ?: return false
+        if (!isTeknoParrotLaunchIntent(launchIntent))
+            return false
+
+        teknoParrotCompanionMode = true
+        val launchManifest = File(
+            launchIntent.getStringExtra(EXTRA_TEKNOPARROT_GAME_PATH).orEmpty()
+        )
+        // The cabinet id belongs to the manifest, not its filename. Keeping the
+        // filename fallback preserves direct development launches, while parsing
+        // gameid makes copied/app-owned manifests and future TPUI descriptors use
+        // the same title-specific controls as the native arcade core.
+        teknoParrotGameId = runCatching {
+            launchManifest.useLines { lines ->
+                lines
+                    .map { it.trim() }
+                    .firstOrNull { it.startsWith("gameid=", ignoreCase = true) }
+                    ?.substringAfter('=')
+                    ?.trim()
+                    .orEmpty()
+            }
+        }.getOrDefault("")
+            .ifBlank { launchManifest.nameWithoutExtension }
+            .uppercase()
+        teknoParrotProfileName =
+            launchIntent.getStringExtra(EXTRA_TEKNOPARROT_PROFILE_NAME).orEmpty()
+        teknoParrotCallbackPackage =
+            launchIntent.getStringExtra(EXTRA_TEKNOPARROT_CALLBACK_PACKAGE)
+                ?.takeIf { it == "com.teknoparrot.ui" }
+                .orEmpty()
+        teknoParrotSessionToken =
+            launchIntent.getStringExtra(EXTRA_TEKNOPARROT_SESSION_TOKEN)
+                ?.takeIf {
+                    it.length in 32..128 &&
+                        it.all { character -> character.isLetterOrDigit() || character == '-' || character == '_' }
+                }
+                .orEmpty()
+        val root = teknoParrotDataRoot()
+        val biosDirectory = File(root, "bios").apply { mkdirs() }
+        val preferredBios = File(biosDirectory, "r27v1602f.7d")
+        val selectedBios = preferredBios.takeIf { it.isFile && it.length() > 0L }
+            ?: biosDirectory.listFiles()
+                ?.firstOrNull { it.isFile && it.length() > 0L && !it.name.startsWith(".") }
+
+        setupComplete.value = true
+        setupRecoveryNeeded.value = false
+        systemDir.value = root.absolutePath
+        bios.value = selectedBios?.absolutePath
+        biosDir.value = biosDirectory.absolutePath
+        prefs.edit {
+            putBoolean("setupComplete", true)
+            putString("systemDir", root.absolutePath)
+            putString("biosDir", biosDirectory.absolutePath)
+            if (selectedBios != null)
+                putString("bios", selectedBios.absolutePath)
+        }
+
+        println(
+            "@@TPUI_COMPANION_CONFIG@@ root=${root.absolutePath} " +
+                "bios=${selectedBios?.name ?: "<missing>"} " +
+                "gameId=${teknoParrotGameId.take(32)} " +
+                "profile=${teknoParrotProfileName.take(120)}"
+        )
+        publishTeknoParrotSessionStatus("accepted")
+        return true
+    }
+
+    private fun handleTeknoParrotStopIntent(intent: Intent?): Boolean {
+        if (intent?.action != ACTION_TEKNOPARROT_STOP_GAME)
+            return false
+
+        val token = intent.getStringExtra(EXTRA_TEKNOPARROT_SESSION_TOKEN).orEmpty()
+        if (!teknoParrotCompanionMode ||
+            token.isBlank() ||
+            token != teknoParrotSessionToken
+        ) {
+            println("@@TPUI_STOP_REJECT@@ reason=invalid_session_token")
+            return true
+        }
+
+        println("@@TPUI_STOP_ACCEPT@@ gameId=${teknoParrotGameId.take(32)}")
+        publishTeknoParrotSessionStatus("stopping")
+        quitAfterStop = true
+        stop()
+        return true
+    }
+
+    /**
+     * Development fallback for the final Binder descriptor handoff. TPUI's
+     * production bridge supplies the same TPJ1 descriptor directly; an explicit
+     * path lets adb-driven qualification exercise mmap and the real JVS parser
+     * before the service is wired into TeknoParrotUi.
+     */
+    private fun attachTeknoParrotInputPage(intent: Intent?): Boolean {
+        if (!teknoParrotCompanionMode)
+            return false
+
+        val root = teknoParrotDataRoot()
+        val requested = intent?.getStringExtra(EXTRA_TEKNOPARROT_INPUT_PAGE_PATH)
+            ?.takeIf { it.isNotBlank() }
+        val page = requested?.let(::File)
+            ?: File(File(root, "bridge"), "TeknoParrot_JvsState.page")
+
+        return runCatching {
+            page.parentFile?.mkdirs()
+            java.io.RandomAccessFile(page, "rw").use { file ->
+                if (file.length() < 4096L)
+                    file.setLength(4096L)
+            }
+            ParcelFileDescriptor.open(page, ParcelFileDescriptor.MODE_READ_WRITE).use { descriptor ->
+                val mapped = NativeApp.setTeknoParrotInputPageFd(descriptor.fd)
+                println(
+                    "@@TPUI_INPUT_PAGE@@ mapped=${if (mapped) 1 else 0} " +
+                        "path=${page.absolutePath}"
+                )
+                mapped
+            }
+        }.onFailure {
+            println("@@TPUI_INPUT_PAGE_FAILED@@ path=${page.absolutePath} error=${it.message}")
+        }.getOrDefault(false)
+    }
+
     /** Build-config flag for the auto-boot-to-BIOS path above. Flip to
      *  true (here, or move to BuildConfig via app/build.gradle.kts if a
      *  variant-level toggle is wanted) to drop straight into the BIOS
@@ -1735,6 +2034,16 @@ open class MainActivityRuntime : ComponentActivity() {
      *  game boot (applyRendererPrefs) and on exit-to-library — currentGame decides the tier:
      *  a running game gets its per-game rotation, the library/menus get the global one. */
     fun applyEmulationOrientation() {
+        // TeknoParrot's System 246/256 companion is an arcade cabinet surface,
+        // not the standalone PS2 frontend. Keep the complete game and its
+        // arcade overlay in landscape even when Android auto-rotate is disabled
+        // or the handset is physically upright. This branch is deliberately
+        // companion-only; ordinary ARMSX2 launches retain their per-game choice.
+        if (teknoParrotCompanionMode) {
+            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            return
+        }
+
         // A running game uses its per-game renderer rotation; the launcher/library uses its own
         // app-level rotation (AetherSX2-style split). Both share the 0/1/2/3 mapping below.
         val orientation = if (currentGame.value != null)
@@ -1780,6 +2089,11 @@ open class MainActivityRuntime : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         applyEdgeToEdge()
         super.onCreate(savedInstanceState)
+        if (!isTeknoParrotLaunchIntent(intent)) {
+            println("@@TPUI_COMPANION_REJECT@@ reason=invalid_or_direct_launch")
+            finishAndRemoveTask()
+            return
+        }
         com.armsx2.navigation.UiNavigator.drawerOpen.value = false
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             window.isStatusBarContrastEnforced = false
@@ -1854,6 +2168,7 @@ open class MainActivityRuntime : ComponentActivity() {
         systemDir.value = prefs.getString("systemDir", null)
         bios.value = prefs.getString("bios", null)
         biosDir.value = prefs.getString("biosDir", null)
+        val teknoParrotLaunch = configureTeknoParrotCompanion(intent)
         // Load roms folders. New format: JSON array under "romsDirs" pref.
         // Legacy format: single string under "roms" pref (pre-multi-dir).
         // Migration path: read legacy if present, hoist into the list, keep
@@ -1877,7 +2192,7 @@ open class MainActivityRuntime : ComponentActivity() {
         // the user in an empty library with the wizard skipped. If no configured ROMs
         // folder is actually reachable, drop setupComplete for this session so the wizard
         // re-runs (and re-requests the permission); finishSetup re-arms it.
-        if (setupComplete.value && !romsAccessible(this, romsDirs.value)) {
+        if (!teknoParrotLaunch && setupComplete.value && !romsAccessible(this, romsDirs.value)) {
             setupComplete.value = false
             setupRecoveryNeeded.value = true
         }
@@ -1963,6 +2278,8 @@ open class MainActivityRuntime : ComponentActivity() {
             eState.value = EmuState.EMULATOR_UNSUPPORTED
             println("DEVICE_UNSUPPORTED")
         }
+        if (teknoParrotLaunch)
+            attachTeknoParrotInputPage(intent)
         handleExternalLaunchIntent(intent)
         setContent {
             com.armsx2.ui.theme.Armsx2Theme {
@@ -2448,6 +2765,37 @@ open class MainActivityRuntime : ComponentActivity() {
                             com.armsx2.ui.emulation.EmulationMenuInputController.open()
                         }
                     }
+                }
+                return true
+            }
+        }
+        // A TPUI companion session is an arcade cabinet, not a DualShock game.
+        // Route physical controller buttons into the same JVS overlay producer
+        // as the touch surface. Back remains the session/menu key above, and
+        // frontend screens retain ownership through the frontendCovers gate.
+        if (teknoParrotCompanionMode &&
+            eState.value == EmuState.RUNNING &&
+            !WindowImpl.frontendCovers
+        ) {
+            val arcadeInput = com.armsx2.ui.touch.TeknoParrotArcadeInput
+            val drumAxis = arcadeInput.gamepadDrumAxis(teknoParrotGameId, kc)
+            if (drumAxis != null) {
+                when (event.action) {
+                    KeyEvent.ACTION_DOWN ->
+                        arcadeInput.setAxis(drumAxis, 1f, active = true)
+                    KeyEvent.ACTION_UP ->
+                        arcadeInput.setAxis(drumAxis, 0f, active = false)
+                }
+                return true
+            }
+            val arcadeButton =
+                arcadeInput.gamepadButton(teknoParrotGameId, kc)
+            if (arcadeButton != null) {
+                when (event.action) {
+                    KeyEvent.ACTION_DOWN ->
+                        arcadeInput.set(arcadeButton, true)
+                    KeyEvent.ACTION_UP ->
+                        arcadeInput.set(arcadeButton, false)
                 }
                 return true
             }
@@ -3086,6 +3434,15 @@ open class MainActivityRuntime : ComponentActivity() {
         if (controllerDrivesFrontend() && handleControllerUiMotion(ev)) {
             return true
         }
+        if (teknoParrotCompanionMode &&
+            eState.value == EmuState.RUNNING &&
+            !WindowImpl.frontendCovers &&
+            (ev.isFromSource(InputDevice.SOURCE_JOYSTICK) ||
+                ev.isFromSource(InputDevice.SOURCE_GAMEPAD))
+        ) {
+            handleTeknoParrotArcadeMotion(ev)
+            return true
+        }
         if (eState.value == EmuState.RUNNING) {
             // Only true gamepad/joystick motion drives the PS2 pads. A DualSense's
             // touchpad/mouse node also emits generic motion (pointer AXIS_X/Y); reading
@@ -3148,6 +3505,82 @@ open class MainActivityRuntime : ComponentActivity() {
             return true
         }
         return super.dispatchGenericMotionEvent(ev)
+    }
+
+    private val teknoParrotMotionHeld = HashSet<Int>()
+
+    private fun handleTeknoParrotArcadeMotion(ev: MotionEvent) {
+        val driving =
+            com.armsx2.ui.touch.TeknoParrotArcadeInput.isDrivingGame(teknoParrotGameId)
+        val zoids =
+            com.armsx2.ui.touch.TeknoParrotArcadeInput.isZoidsGame(teknoParrotGameId)
+        var x = ev.getAxisValue(MotionEvent.AXIS_X).coerceIn(-1f, 1f)
+        val y = ev.getAxisValue(MotionEvent.AXIS_Y)
+        val hatX = ev.getAxisValue(MotionEvent.AXIS_HAT_X)
+        val hatY = ev.getAxisValue(MotionEvent.AXIS_HAT_Y)
+        val (rightAxisX, rightAxisY) = rightStickAxes(ev.deviceId)
+        val rightX = if (zoids) ev.getAxisValue(rightAxisX) else 0f
+        val rightY = if (zoids) ev.getAxisValue(rightAxisY) else 0f
+        val threshold = 0.45f
+
+        if (driving) {
+            if (abs(x) < 0.05f)
+                x = 0f
+            val extraRightTrigger = rightTriggerExtraAxis(ev.deviceId)
+            val gas = maxOf(
+                ev.getAxisValue(MotionEvent.AXIS_RTRIGGER),
+                ev.getAxisValue(MotionEvent.AXIS_GAS),
+                if (extraRightTrigger >= 0) ev.getAxisValue(extraRightTrigger) else 0f,
+            ).coerceIn(0f, 1f)
+            val brake = maxOf(
+                ev.getAxisValue(MotionEvent.AXIS_LTRIGGER),
+                ev.getAxisValue(MotionEvent.AXIS_BRAKE),
+            ).coerceIn(0f, 1f)
+            com.armsx2.ui.touch.TeknoParrotArcadeInput.setAxis(
+                com.armsx2.ui.touch.TeknoParrotArcadeInput.AXIS_STEER, x,
+            )
+            com.armsx2.ui.touch.TeknoParrotArcadeInput.setAxis(
+                com.armsx2.ui.touch.TeknoParrotArcadeInput.AXIS_GAS, gas,
+            )
+            com.armsx2.ui.touch.TeknoParrotArcadeInput.setAxis(
+                com.armsx2.ui.touch.TeknoParrotArcadeInput.AXIS_BRAKE, brake,
+            )
+        }
+
+        val next = buildSet {
+            // A driving stick is the wheel. Its HAT remains available for the
+            // cabinet's menu/gear switches instead of double-driving Left/Right.
+            val arcadeInput = com.armsx2.ui.touch.TeknoParrotArcadeInput
+            fun movement(direction: Int): Int =
+                if (zoids) arcadeInput.zoidsMoveButton(direction) else direction
+
+            if ((!driving && x <= -threshold) || hatX <= -threshold)
+                add(movement(arcadeInput.LEFT))
+            if ((!driving && x >= threshold) || hatX >= threshold)
+                add(movement(arcadeInput.RIGHT))
+            if ((!driving && y <= -threshold) || hatY <= -threshold)
+                add(movement(arcadeInput.UP))
+            if ((!driving && y >= threshold) || hatY >= threshold)
+                add(movement(arcadeInput.DOWN))
+
+            // Zoids' second cabinet lever is the physical right stick.
+            if (zoids && rightX <= -threshold)
+                add(arcadeInput.zoidsJumpButton(arcadeInput.LEFT))
+            if (zoids && rightX >= threshold)
+                add(arcadeInput.zoidsJumpButton(arcadeInput.RIGHT))
+            if (zoids && rightY <= -threshold)
+                add(arcadeInput.zoidsJumpButton(arcadeInput.UP))
+            if (zoids && rightY >= threshold)
+                add(arcadeInput.zoidsJumpButton(arcadeInput.DOWN))
+        }
+        (teknoParrotMotionHeld - next).forEach {
+            com.armsx2.ui.touch.TeknoParrotArcadeInput.set(it, false)
+        }
+        (next - teknoParrotMotionHeld).forEach {
+            com.armsx2.ui.touch.TeknoParrotArcadeInput.set(it, true)
+        }
+        teknoParrotMotionHeld.clear()
+        teknoParrotMotionHeld.addAll(next)
     }
 
     // ---- Physical stick-direction → bound PS2 control ("(send)" rows) ------
@@ -4296,6 +4729,14 @@ open class MainActivityRuntime : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        if (handleTeknoParrotStopIntent(intent))
+            return
+        if (!configureTeknoParrotCompanion(intent)) {
+            println("@@TPUI_COMPANION_REJECT@@ reason=invalid_new_intent")
+            finishAndRemoveTask()
+            return
+        }
+        attachTeknoParrotInputPage(intent)
         handleExternalLaunchIntent(intent)
     }
 
@@ -4310,7 +4751,13 @@ open class MainActivityRuntime : ComponentActivity() {
             super.onDestroy()
             return
         }
+        if (teknoParrotCompanionMode)
+            publishTeknoParrotSessionStatus("stopping")
         NativeApp.shutdown()
+        if (teknoParrotCompanionMode) {
+            NativeApp.clearTeknoParrotInputPage()
+            publishTeknoParrotSessionStatus("stopped")
+        }
         super.onDestroy()
 
         val appPid = Process.myPid()
@@ -4392,7 +4839,14 @@ open class MainActivityRuntime : ComponentActivity() {
 
         intent.clipData?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.uri?.let { return it }
 
-        for (key in listOf("path", "game", "rom", "uri", "android.intent.extra.STREAM")) {
+        for (key in listOf(
+            EXTRA_TEKNOPARROT_GAME_PATH,
+            "path",
+            "game",
+            "rom",
+            "uri",
+            "android.intent.extra.STREAM",
+        )) {
             val value = intent.getStringExtra(key)?.takeIf { it.isNotBlank() } ?: continue
             return value.toUri()
         }

@@ -17,7 +17,20 @@ bool ChdImage::Open(const std::string& path)
     chd_error err = chd_open(path.c_str(), CHD_OPEN_READ, nullptr, &m_chd);
 
     if (err != CHDERR_NONE) {
-        Console.ErrorFmt("{} failed to open CHD: {}", __FUNCTION__, (int)err);
+        chd_header header = {};
+        const chd_error headerErr = chd_read_header(path.c_str(), &header);
+        Console.ErrorFmt(
+            "{} failed to open CHD: {} ({}) header={} ({}) version={} length={} logical={} hunks={} "
+            "hunkbytes={} unitbytes={} expanded={} max={} oversize={} map={} meta={}",
+            __FUNCTION__, static_cast<int>(err), chd_error_string(err),
+            static_cast<int>(headerErr), chd_error_string(headerErr),
+            header.version, header.length, header.logicalbytes, header.totalhunks,
+            header.hunkbytes, header.unitbytes,
+            static_cast<u64>(header.hunkbytes) * static_cast<u64>(header.totalhunks),
+            80ULL * 1024ULL * 1024ULL * 1024ULL,
+            (static_cast<u64>(header.hunkbytes) * static_cast<u64>(header.totalhunks)) >=
+                (80ULL * 1024ULL * 1024ULL * 1024ULL),
+            header.mapoffset, header.metaoffset);
         return false;
     }
 

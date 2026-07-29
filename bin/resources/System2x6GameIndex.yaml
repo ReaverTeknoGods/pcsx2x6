@@ -284,6 +284,11 @@ NM00042:
   bootprog: BASLOAD
   media: DVD
   input: button
+  # Hardware rendering fragments the pre-rendered video into stale target
+  # rectangles on Adreno/Vulkan. Keep gameplay on hardware and switch only
+  # the detected FMV interval through the existing PCSX2 software path.
+  gameFixes:
+    - SoftwareRendererFMVHack
 NM00043:
   name: Mobile Suit Gundam - Gundam vs. Gundam
   region: System256

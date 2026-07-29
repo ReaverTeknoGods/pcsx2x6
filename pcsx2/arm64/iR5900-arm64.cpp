@@ -145,8 +145,9 @@ bool g_eeRecLastBlockFF = false;
 #endif
 
 // Self-modifying code detection
-static u16 manual_page[Ps2MemSize::MainRam / 4096] = {};
-static u8 manual_counter[Ps2MemSize::MainRam / 4096] = {};
+static u16 manual_page[Ps2MemSize::TotalRam / 4096] = {};
+static u8 manual_counter[Ps2MemSize::TotalRam / 4096] = {};
+static bool extraRam = false;
 
 // Forward declarations
 static void recRecompile(const u32 startpc);
@@ -646,7 +647,8 @@ static void recError(u32 error)
 	{
 		case 0:
 			Host::ReportErrorAsync("R5900 Exception",
-				fmt::format("Unrecognized opcode (PC: 0x{:08x})", cpuRegs.pc));
+				fmt::format("Jump to unmapped recLUT page (PC: 0x{:08x}, instruction: 0x{:08x})",
+					cpuRegs.pc, cpuRegs.code));
 			break;
 
 		case 1:
@@ -2636,7 +2638,7 @@ static bool memory_protect_recompiled_code(u32 startpc, u32 size)
 
 static void recReserveRAM()
 {
-	recLutEntries = (Ps2MemSize::MainRam + Ps2MemSize::Rom + Ps2MemSize::Rom1 + Ps2MemSize::Rom2) / 4;
+	recLutEntries = (Ps2MemSize::ExposedRam + Ps2MemSize::Rom + Ps2MemSize::Rom1 + Ps2MemSize::Rom2) / 4;
 
 	if (recLutReserve_RAM.size() != recLutEntries)
 		recLutReserve_RAM.resize(recLutEntries);
@@ -2645,7 +2647,7 @@ static void recReserveRAM()
 
 	BASEBLOCK* curpos = recLutReserve_RAM.data();
 	recRAM = curpos;
-	curpos += (Ps2MemSize::MainRam / 4);
+	curpos += (Ps2MemSize::ExposedRam / 4);
 	recROM = curpos;
 	curpos += (Ps2MemSize::Rom / 4);
 	recROM1 = curpos;
@@ -2653,8 +2655,8 @@ static void recReserveRAM()
 	recROM2 = curpos;
 	curpos += (Ps2MemSize::Rom2 / 4);
 
-	if (recRAMCopy.size() != Ps2MemSize::MainRam)
-		recRAMCopy.resize(Ps2MemSize::MainRam);
+	if (recRAMCopy.size() != Ps2MemSize::ExposedRam)
+		recRAMCopy.resize(Ps2MemSize::ExposedRam);
 }
 
 static void recReserve()
@@ -2707,6 +2709,12 @@ static void recResetRaw()
 {
 	Console.WriteLn(Color_Green, "iR5900-ARM64 Recompiler reset.");
 
+	if (CHECK_EXTRAMEM != extraRam)
+	{
+		recReserveRAM();
+		extraRam = !extraRam;
+	}
+
 	// The code-cache rewind below dangles every host landing pointer in the
 	// call-ret ring — sentinel-fill so no stale frame can match. (recClear
 	// needs nothing: dead block entries keep resolving via redirect stubs.)
@@ -2752,7 +2760,7 @@ static void recResetRaw()
 	Console.WriteLn(Color_Green, "EE ARM64: Dispatcher generated at %p (%zu bytes)", dispStart, (size_t)(dispEnd - dispStart));
 
 	iopClearRecLUT(recLutReserve_RAM.data(),
-		Ps2MemSize::MainRam + Ps2MemSize::Rom + Ps2MemSize::Rom1 + Ps2MemSize::Rom2);
+		Ps2MemSize::ExposedRam + Ps2MemSize::Rom + Ps2MemSize::Rom1 + Ps2MemSize::Rom2);
 
 	BASEBLOCK* unmapped = recLutUnmapped.data();
 
@@ -2762,18 +2770,19 @@ static void recResetRaw()
 	for (int i = 0; i < _64kb / 4; i++)
 		unmapped[i].SetFnptr((uptr)UnmappedRecLUTPage);
 
-	// Map EE RAM (32MB, mirrored)
-	for (int i = 0; i < 0x200; i++)
+	// Map all currently exposed EE RAM and its direct mirrors. System 246/256
+	// titles can execute code above the retail 32 MB boundary; those pages need
+	// real compile-on-first-hit LUT entries just like the x86 recompiler.
+	for (int i = 0; i < static_cast<int>(Ps2MemSize::ExposedRam / _64kb); i++)
 	{
-		u32 mask = (Ps2MemSize::MainRam / _64kb) - 1;
-		recLUT_SetPage(recLUT, hwLUT, recRAM, 0x0000, i, i & mask);
-		recLUT_SetPage(recLUT, hwLUT, recRAM, 0x2000, i, i & mask);
-		recLUT_SetPage(recLUT, hwLUT, recRAM, 0x3000, i, i & mask);
-		recLUT_SetPage(recLUT, hwLUT, recRAM, 0x8000, i, i & mask);
-		recLUT_SetPage(recLUT, hwLUT, recRAM, 0xa000, i, i & mask);
-		recLUT_SetPage(recLUT, hwLUT, recRAM, 0xb000, i, i & mask);
-		recLUT_SetPage(recLUT, hwLUT, recRAM, 0xc000, i, i & mask);
-		recLUT_SetPage(recLUT, hwLUT, recRAM, 0xd000, i, i & mask);
+		recLUT_SetPage(recLUT, hwLUT, recRAM, 0x0000, i, i);
+		recLUT_SetPage(recLUT, hwLUT, recRAM, 0x2000, i, i);
+		recLUT_SetPage(recLUT, hwLUT, recRAM, 0x3000, i, i);
+		recLUT_SetPage(recLUT, hwLUT, recRAM, 0x8000, i, i);
+		recLUT_SetPage(recLUT, hwLUT, recRAM, 0xa000, i, i);
+		recLUT_SetPage(recLUT, hwLUT, recRAM, 0xb000, i, i);
+		recLUT_SetPage(recLUT, hwLUT, recRAM, 0xc000, i, i);
+		recLUT_SetPage(recLUT, hwLUT, recRAM, 0xd000, i, i);
 	}
 
 	// Map BIOS ROM
@@ -3217,7 +3226,18 @@ static void recRecompile(const u32 startpc)
 	armStartBlock();
 
 	s_pCurBlock = GETBLOCK(startpc);
-	pxAssert(s_pCurBlock->GetFnptr() == (uptr)JITCompile || s_pCurBlock->GetFnptr() == (uptr)UnmappedRecLUTPage);
+	// A stale direct-link redirect can legitimately reach JITCompile after
+	// this LUT entry has already been rebound to a live block. This happens
+	// when a straddling recClear removes the old owner, redirects its entry,
+	// and the target is compiled again before every surviving caller is
+	// repatched. Recompiling in place is safe and repairs the registered
+	// callers: New() below deliberately reuses the BASEBLOCKEX and publishes
+	// the replacement fnptr. Asserting here made System 256 titles such as
+	// Super Dragon Ball Z abort on their first self-modifying-code pass.
+	const uptr previous_fnptr = s_pCurBlock->GetFnptr();
+	if (previous_fnptr != (uptr)JITCompile && previous_fnptr != (uptr)UnmappedRecLUTPage)
+		DevCon.Warning("EE ARM64: recompiling live LUT entry at %08X (fnptr=%p)", startpc,
+			reinterpret_cast<void*>(previous_fnptr));
 
 	// armStartBlock() aligned armAsmPtr to 16 bytes, so the actual block
 	// code starts at armGetCurrentCodePointer(), not at recPtr. Block
@@ -3827,7 +3847,7 @@ StartRecomp:
 	// mismatched and recompile-looped — which is why this was disabled; the
 	// old-block-region compare is the correct x86 semantics
 	// (OverlapWalkIgnoresUnmodifiedNeighbors pins the no-false-positive side).
-	if (HWADDR(pc) <= Ps2MemSize::MainRam)
+	if (HWADDR(pc) <= Ps2MemSize::ExposedRam)
 	{
 		BASEBLOCKEX* oldBlock;
 		int i = recBlocks.LastIndex(HWADDR(pc) - 4);

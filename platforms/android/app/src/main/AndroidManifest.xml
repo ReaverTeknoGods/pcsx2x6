@@ -49,51 +49,27 @@
             android:name=".BootSplashActivity"
             android:configChanges="keyboard|keyboardHidden|orientation|screenLayout|uiMode|screenSize|smallestScreenSize"
             android:hardwareAccelerated="true"
-            android:exported="true"
+            android:exported="false"
             android:resizeableActivity="false"
-            android:theme="@style/Theme.ARMSX2.Boot">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-                <category android:name="android.intent.category.GAME" />
-            </intent-filter>
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="content" />
-                <data android:scheme="file" />
-            </intent-filter>
-        </activity>
+            android:theme="@style/Theme.ARMSX2.Boot" />
 
+        <!-- PCSX2X6 is a private TPUI companion, not a standalone Android
+             launcher. The explicit activity remains exported only for TPUI's
+             signature-protected launch intent. -->
         <activity
             android:name=".Main"
             android:launchMode="singleTop"
             android:configChanges="keyboard|keyboardHidden|orientation|screenLayout|uiMode|screenSize|smallestScreenSize"
+            android:excludeFromRecents="true"
             android:hardwareAccelerated="true"
             android:exported="true"
-            android:resizeableActivity="false">
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="content" />
-                <data android:scheme="file" />
-            </intent-filter>
-        </activity>
+            android:permission="com.teknoparrot.permission.BIND_BRIDGE"
+            android:resizeableActivity="false" />
 
         <activity-alias
             android:name=".MainActivity"
-            android:exported="true"
-            android:targetActivity=".Main">
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="content" />
-                <data android:scheme="file" />
-            </intent-filter>
-        </activity-alias>
+            android:exported="false"
+            android:targetActivity=".Main" />
 
         <receiver
             android:name=".RetroAchievementsHostOverrideReceiver"
@@ -101,6 +77,17 @@
             <intent-filter>
                 <action android:name="${applicationId}.action.SET_RETROACHIEVEMENTS_HOST_OVERRIDE" />
                 <action android:name="${applicationId}.action.CLEAR_RETROACHIEVEMENTS_HOST_OVERRIDE" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".TeknoParrotSessionControlReceiver"
+            android:exported="true"
+            android:permission="com.teknoparrot.permission.BIND_BRIDGE">
+            <intent-filter>
+                <action android:name="com.teknoparrot.pcsx2x6.action.QUERY_SESSION" />
+                <action android:name="com.teknoparrot.pcsx2x6.action.STOP_GAME" />
+                <action android:name="com.teknoparrot.pcsx2x6.action.QUERY_CATALOG" />
             </intent-filter>
         </receiver>
     </application>
