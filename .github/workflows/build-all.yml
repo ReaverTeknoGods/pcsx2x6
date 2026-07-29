@@ -1,37 +1,19 @@
-# Unified "build everything on every commit" pipeline for the single-core monorepo.
-#
-# One push to the default branch fans out to every supported target and uploads
-# an individual binary artifact per platform:
-#   * PC arm64 Qt GUI  -> macOS, Linux, Windows  (reuses the reusable workflows)
-#   * Android APK       -> platforms/android  (Gradle + NDK, thin CMake on root core)
-#   * iOS .app          -> platforms/ios      (Xcode/CMake on root core)
-#
-# Windows-on-arm64 builds natively on a Windows 11 arm64 runner (see
-# windows_build_qt.yml): a single arm64 deps stage, then the arm64 GUI.
-#
-# NOTE: The Android and iOS jobs build against the freshly-collapsed single core
-# and have not yet had a green run; they are the mechanism that will surface the
-# remaining reconciliation work. Keep them non-blocking until they first pass.
-#
-# INVARIANT (do not weaken): the PC arm64 jobs (pc-macos-arm64 / pc-linux-arm64 /
-# pc-windows-arm64) are BLOCKING and must stay so. They are the guardrail that a
-# mobile-motivated change has not silently altered the shared canonical core.
-# Anything mobile-specific belongs behind a platform guard (#if __ANDROID__ /
-# ARMSX2_IOS) or in a forked, CMake-selected translation unit (see the aR5900*
-# EE fork in pcsx2/CMakeLists.txt) -- never grafted unguarded into shared files.
-name: Build All Platforms
+# Android-only build and rolling updater release for the dedicated ARMSX2-based
+# TeknoParrot companion branch. Desktop and iOS builds remain independent on
+# their own branches and workflows.
+name: Build Android
 
 on:
   push:
-    # Build every pushed source branch. Per-ref concurrency below cancels an
-    # older in-flight run when a newer commit is pushed to the same branch, so
-    # the surviving artifact always corresponds to that branch's latest SHA.
-    # Doc-only pushes shouldn't burn ~2h of arm64 CI.
+    branches:
+      - codex/android-port
     paths-ignore:
       - '**/*.md'
       - 'LICENSE*'
       - '.gitignore'
   pull_request:
+    branches:
+      - codex/android-port
     paths-ignore:
       - '**/*.md'
       - 'LICENSE*'
@@ -39,73 +21,10 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: build-all-${{ github.ref }}
+  group: build-android-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  # ---- PC arm64 Qt GUI (mac / linux) -------------------------------------
-  pc-macos-arm64:
-    name: PC · macOS arm64 (Qt)
-    uses: ./.github/workflows/macos_build.yml
-    with:
-      jobName: "macOS arm64"
-      artifactPrefixName: "armsx2-macos-arm64"
-      sign_and_notarize: true
-    secrets: inherit
-
-  pc-linux-arm64:
-    name: PC · Linux arm64 (Qt)
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # The GitHub aarch64 runners use 4K pages, so an unqualified build only
-          # runs on 4K-page kernels. 16K-page kernels (e.g. Asahi Linux on Apple
-          # Silicon) need a separate binary, so build both variants explicitly
-          # instead of quietly inheriting the runner's page size.
-          - pageVariant: "4k"
-            pageSize: "4096"
-            cacheLineSize: "64"
-          - pageVariant: "16k"
-            pageSize: "16384"
-            cacheLineSize: "128"
-    uses: ./.github/workflows/linux_build_qt.yml
-    with:
-      jobName: "Linux arm64 (${{ matrix.pageVariant }} pages)"
-      artifactPrefixName: "armsx2-linux-arm64-${{ matrix.pageVariant }}-appimage"
-      compiler: clang
-      cmakeflags: "-DHOST_PAGE_SIZE=${{ matrix.pageSize }} -DHOST_CACHE_LINE_SIZE=${{ matrix.cacheLineSize }}"
-      buildAppImage: true
-
-  # ---- libretro core (linux arm64) ---------------------------------------
-  pc-linux-arm64-libretro:
-    name: PC · Linux arm64 (libretro core)
-    uses: ./.github/workflows/linux_build_libretro.yml
-    with:
-      jobName: "libretro Core Build (arm64)"
-      artifactPrefixName: "armsx2-linux-arm64-libretro"
-      fetchTags: true
-    secrets: inherit
-
-  # ---- SDL/kmsdrm handheld frontend (linux arm64) ------------------------
-  pc-linux-arm64-sdl:
-    name: PC · Linux arm64 (SDL kmsdrm)
-    uses: ./.github/workflows/linux_build_sdl.yml
-    with:
-      jobName: "SDL Handheld Build (arm64)"
-      artifactPrefixName: "armsx2-linux-arm64-sdl"
-      fetchTags: true
-    secrets: inherit
-
-  # ---- PC arm64 Qt GUI (windows) -----------------------------------------
-  pc-windows-arm64:
-    name: PC · Windows arm64 (Qt)
-    uses: ./.github/workflows/windows_build_qt.yml
-    with:
-      jobName: "Windows arm64"
-      artifactPrefixName: "armsx2-windows-arm64"
-
-  # ---- Android APK -------------------------------------------------------
   android:
     name: Android APK
     runs-on: ubuntu-24.04
@@ -467,89 +386,3 @@ jobs:
               f"size={expected_size} digest={expected_digest}"
           )
           PY
-
-  # ---- iOS .app ----------------------------------------------------------
-  ios:
-    name: iOS (arm64, unsigned device IPA)
-    runs-on: macos-26
-    # Non-blocking until the collapsed-core iOS build first goes green.
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          submodules: recursive
-
-      - name: Select Xcode
-        run: sudo xcode-select -switch /Applications/Xcode.app
-
-      - name: Configure (CMake, Xcode generator, real device SDK, no signing)
-        working-directory: platforms/ios/app/src/main/cpp
-        run: >
-          cmake -G Xcode -B build
-          -DCMAKE_SYSTEM_NAME=iOS
-          -DCMAKE_OSX_ARCHITECTURES=arm64
-          -DARMSX2_REAL_DEVICE=ON
-
-      - name: Build (iphoneos SDK, unsigned)
-        working-directory: platforms/ios/app/src/main/cpp
-        run: >
-          cmake --build build --config Release
-          -- -sdk iphoneos CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
-
-      - name: Package unsigned .ipa
-        working-directory: platforms/ios/app/src/main/cpp
-        run: |
-          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-8)
-          IPA_NAME="ARMSX2-iOS-${SHORT_SHA}.ipa"
-
-          APP_PATH=$(find build -name "ARMSX2iOS.app" -type d | head -1)
-          if [ -z "$APP_PATH" ]; then
-            echo "ERROR: ARMSX2iOS.app not found in build output"
-            exit 1
-          fi
-
-          echo "Found app at: $APP_PATH"
-          echo "Packaging as: $IPA_NAME"
-
-          STAGING=$(mktemp -d)
-          mkdir -p "$STAGING/Payload"
-          cp -R "$APP_PATH" "$STAGING/Payload/"
-
-          cd "$STAGING"
-          zip -r "$GITHUB_WORKSPACE/$IPA_NAME" Payload -x "*.DS_Store"
-          cd "$GITHUB_WORKSPACE"
-
-          echo "IPA_NAME=$IPA_NAME" >> $GITHUB_ENV
-          ls -lh "$IPA_NAME"
-
-      - name: Upload .ipa
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.IPA_NAME }}
-          path: ${{ github.workspace }}/${{ env.IPA_NAME }}
-          if-no-files-found: error
-
-  # ---- Alert on a broken master build ------------------------------------
-  # Fires only when a BLOCKING guardrail job (the PC arm64 builds) fails on a
-  # push to master -- never on PRs, and never on the non-blocking mobile jobs
-  # (they are continue-on-error, so they can't trip `failure()`). GitHub also
-  # emails the pusher natively; this adds a Discord ping to the shared channel.
-  notify-failure:
-    name: Notify on master build failure
-    needs: [pc-macos-arm64, pc-linux-arm64, pc-windows-arm64]
-    if: ${{ failure() && github.event_name == 'push' }}
-    runs-on: ubuntu-latest
-    # Job-level so the step's `if: env.HOOK != ''` guard can see it.
-    env:
-      HOOK: ${{ secrets.DISCORD_BUILD_WEBHOOK }}
-    steps:
-      - name: Discord failure ping
-        if: ${{ env.HOOK != '' }}   # no-op on forks that lack the secret
-        env:
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          jq -n \
-            --arg url "$RUN_URL" \
-            --arg desc "Commit \`${{ github.sha }}\` by ${{ github.actor }} failed a required build." \
-            '{username:"ARMSX2 CI", embeds:[{title:"❌ master build broke", url:$url, color:15158332, description:$desc}]}' \
-          | curl -fsSL -H 'Content-Type: application/json' -d @- "$HOOK"
