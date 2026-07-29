@@ -30,6 +30,9 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_COMPILERCHECK: content
     defaults:
       run:
         working-directory: platforms/android
@@ -45,13 +48,41 @@ jobs:
           echo "Building source $ACTUAL_SHA"
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "17"
 
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          # Keep this on GitHub's open-source cache implementation and allow
+          # the dedicated long-lived Android branch to populate its own cache.
+          # Pull requests restore caches but never write them.
+          cache-provider: basic
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+
+      - name: Restore Android native compiler cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: android-ccache-v1-${{ runner.os }}-arm64-ndk28.2-${{ hashFiles('platforms/android/app/build.gradle.kts', '**/CMakeLists.txt', '**/*.cmake') }}-${{ github.sha }}
+          restore-keys: |
+            android-ccache-v1-${{ runner.os }}-arm64-ndk28.2-${{ hashFiles('platforms/android/app/build.gradle.kts', '**/CMakeLists.txt', '**/*.cmake') }}-
+            android-ccache-v1-${{ runner.os }}-arm64-ndk28.2-
+
+      - name: Configure Android native compiler cache
+        run: |
+          if ! command -v ccache >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install --yes ccache
+          fi
+          ccache --set-config=max_size=4G
+          ccache --zero-stats
+          ccache --version
 
       # NDK matches the version AGP resolves to (build.gradle.kts pins none, so it
       # uses AGP's default 28.2.13676358); cmake 3.31.6 matches the pin in
@@ -117,10 +148,16 @@ jobs:
         env:
           ANDROID_VERSION_CODE: ${{ steps.android_version.outputs.code }}
           ANDROID_VERSION_NAME: ${{ steps.android_version.outputs.name }}
+          CMAKE_C_COMPILER_LAUNCHER: ccache
+          CMAKE_CXX_COMPILER_LAUNCHER: ccache
         run: |
           ./gradlew :app:assembleGithubRelease --stacktrace \
             -Parmsx2.versionCode="$ANDROID_VERSION_CODE" \
             -Parmsx2.versionName="$ANDROID_VERSION_NAME"
+
+      - name: Report Android native compiler cache
+        if: always()
+        run: ccache --show-stats
 
       - name: Verify generated APK metadata
         env:
