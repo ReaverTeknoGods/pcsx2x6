@@ -61,6 +61,9 @@ jobs:
           # Pull requests restore caches but never write them.
           cache-provider: basic
           cache-read-only: ${{ github.event_name == 'pull_request' }}
+          # This fork carries a custom wrapper JAR that is not in Gradle's
+          # published checksum allowlist. It remains pinned and tracked here.
+          validate-wrappers: false
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
@@ -75,6 +78,7 @@ jobs:
             android-ccache-v1-${{ runner.os }}-arm64-ndk28.2-
 
       - name: Configure Android native compiler cache
+        id: configure_ccache
         run: |
           if ! command -v ccache >/dev/null 2>&1; then
             sudo apt-get update
@@ -156,7 +160,7 @@ jobs:
             -Parmsx2.versionName="$ANDROID_VERSION_NAME"
 
       - name: Report Android native compiler cache
-        if: always()
+        if: always() && steps.configure_ccache.outcome == 'success'
         run: ccache --show-stats
 
       - name: Verify generated APK metadata
