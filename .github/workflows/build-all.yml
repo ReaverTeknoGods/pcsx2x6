@@ -251,26 +251,6 @@ jobs:
             ${{ steps.package_apk.outputs.sha256_path }}
           if-no-files-found: error
 
-      - name: Move rolling release tag to this source
-        if: >-
-          github.event_name == 'push' &&
-          github.repository == 'ReaverTeknoGods/pcsx2x6' &&
-          github.ref == 'refs/heads/codex/android-port'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/pcsx2x6" >/dev/null 2>&1; then
-            gh api --method PATCH \
-              "repos/$GITHUB_REPOSITORY/git/refs/tags/pcsx2x6" \
-              -f sha="$GITHUB_SHA" \
-              -F force=true
-          else
-            gh api --method POST \
-              "repos/$GITHUB_REPOSITORY/git/refs" \
-              -f ref='refs/tags/pcsx2x6' \
-              -f sha="$GITHUB_SHA"
-          fi
-
       - name: Remove stale PCSX2X6 module assets
         if: >-
           github.event_name == 'push' &&
@@ -298,6 +278,7 @@ jobs:
         uses: ncipollo/release-action@v1
         with:
           tag: pcsx2x6
+          commit: master
           name: ${{ steps.android_version.outputs.name }}
           body: |
             Automated TPUI companion module from commit ${{ github.sha }}.
