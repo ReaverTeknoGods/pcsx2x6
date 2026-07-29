@@ -303,11 +303,11 @@ jobs:
           while IFS= read -r asset; do
             case "$asset" in
               pcsx2x6-*-android-arm64.apk|pcsx2x6-*-android-arm64.apk.sha256)
-                gh release delete-asset pcsx2x6 "$asset" --yes
+                gh release delete-asset pcsx2x6-android "$asset" --yes
                 ;;
             esac
           done < <(
-            gh release view pcsx2x6 \
+            gh release view pcsx2x6-android \
               --json assets --jq '.assets[].name' 2>/dev/null || true
           )
 
@@ -318,8 +318,8 @@ jobs:
           github.ref == 'refs/heads/codex/android-port'
         uses: ncipollo/release-action@v1
         with:
-          tag: pcsx2x6
-          commit: master
+          tag: pcsx2x6-android
+          commit: ${{ github.sha }}
           name: ${{ steps.android_version.outputs.name }}
           body: |
             Automated TPUI companion module from commit ${{ github.sha }}.
@@ -344,7 +344,7 @@ jobs:
           EXPECTED_VERSION: ${{ steps.android_version.outputs.name }}
         run: |
           for attempt in 1 2 3 4 5; do
-            if gh api "repos/$GITHUB_REPOSITORY/releases/tags/pcsx2x6" \
+            if gh api "repos/$GITHUB_REPOSITORY/releases/tags/pcsx2x6-android" \
               > "$RUNNER_TEMP/pcsx2x6-release.json"; then
               break
             fi
@@ -367,7 +367,7 @@ jobs:
           expected_size = int(os.environ["EXPECTED_SIZE"])
           expected_digest = os.environ["EXPECTED_DIGEST"].lower()
           expected_version = os.environ["EXPECTED_VERSION"]
-          if release.get("tag_name") != "pcsx2x6":
+          if release.get("tag_name") != "pcsx2x6-android":
               raise SystemExit(f"unexpected release tag: {release.get('tag_name')}")
           if release.get("name") != expected_version:
               raise SystemExit(
