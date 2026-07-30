@@ -55,30 +55,43 @@ class TeknoParrotSessionControlReceiver : BroadcastReceiver() {
     /**
      * Do not trust a non-empty preference alone. A restored Android backup can
      * leave it pointing at a missing file, and users can accidentally select a
-     * non-BIOS image. Re-run PCSX2's native ROMVER parser before TPUI launches
-     * any arcade manifest.
+     * non-BIOS image. Re-run PCSX2's native ROMVER parser for conventional PS2
+     * BIOS images. System 246/256 uses a paired 2 MiB ROM set that is not
+     * individually parseable by ROMVER, so recognize only the exact complete
+     * pair already used by the companion runtime.
      */
     private fun hasValidConfiguredBios(context: Context): Boolean = runCatching {
         val preferences =
             context.applicationContext.getSharedPreferences("ARMSX2", Context.MODE_PRIVATE)
-        val path = preferences.getString("bios", null)?.takeIf(String::isNotBlank)
-            ?: return@runCatching false
-        val file = File(path)
         val biosRoot =
             MainActivityRuntime.internalBiosDir(context.applicationContext).canonicalFile
-        val canonicalFile = file.canonicalFile
-        if (!canonicalFile.isFile ||
-            canonicalFile.length() !in MIN_BIOS_BYTES..MAX_BIOS_BYTES ||
-            canonicalFile.parentFile != biosRoot
-        ) {
-            return@runCatching false
+        val path = preferences.getString("bios", null)?.takeIf(String::isNotBlank)
+        if (path != null) {
+            val canonicalFile = File(path).canonicalFile
+            if (canonicalFile.isFile &&
+                canonicalFile.parentFile == biosRoot &&
+                TeknoParrotBiosFiles.hasStandardBiosSize(canonicalFile)
+            ) {
+                val descriptor = ParcelFileDescriptor.open(
+                    canonicalFile,
+                    ParcelFileDescriptor.MODE_READ_ONLY,
+                )
+                if (NativeApp.getBiosInfoFromFd(descriptor.detachFd()) != null)
+                    return@runCatching true
+            }
         }
 
-        val descriptor = ParcelFileDescriptor.open(
-            canonicalFile,
-            ParcelFileDescriptor.MODE_READ_ONLY,
-        )
-        NativeApp.getBiosInfoFromFd(descriptor.detachFd()) != null
+        val splitSet =
+            TeknoParrotBiosFiles.findSystem246SplitSet(biosRoot)
+                ?: return@runCatching false
+        // Repair stale/missing preferences after an app update or Android
+        // backup restore. Both files are already inside this app's private
+        // external-files directory and have passed the exact pair checks.
+        preferences.edit()
+            .putString("bios", splitSet.primary.absolutePath)
+            .putString("biosDir", biosRoot.absolutePath)
+            .apply()
+        true
     }.getOrDefault(false)
 
     private fun sendReadyCatalog(context: Context, request: Intent) {
@@ -213,10 +226,6 @@ class TeknoParrotSessionControlReceiver : BroadcastReceiver() {
             "com.teknoparrot.pcsx2x6.extra.GAME_IDS"
         private const val EXTRA_BIOS_READY =
             "com.teknoparrot.pcsx2x6.extra.BIOS_READY"
-        // Accept the 2 MiB System 2x6 ROM form; the native parser below still
-        // rejects arbitrary files before reporting BIOS readiness.
-        private const val MIN_BIOS_BYTES = 2L * 1024L * 1024L
-        private const val MAX_BIOS_BYTES = 8L * 1024L * 1024L
         private val GAME_ID = Regex("""NM\d{5}(?:_[A-Za-z0-9]+)?""")
         private val SAFE_NAME = Regex("""[A-Za-z0-9_. -]+""")
     }

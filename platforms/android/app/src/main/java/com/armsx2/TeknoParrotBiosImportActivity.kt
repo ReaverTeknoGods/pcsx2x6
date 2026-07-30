@@ -13,6 +13,8 @@ import androidx.documentfile.provider.DocumentFile
 import com.armsx2.runtime.MainActivityRuntime
 import kr.co.iefriends.pcsx2.NativeApp
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 
 /**
  * Single-purpose, signature-protected BIOS picker used by TeknoParrotUI.
@@ -20,15 +22,15 @@ import java.io.File
  */
 class TeknoParrotBiosImportActivity : ComponentActivity() {
     private val picker =
-        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-            if (uri == null) {
+        registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+            if (uris.isEmpty()) {
                 setResult(Activity.RESULT_CANCELED)
                 finish()
                 return@registerForActivityResult
             }
 
             Thread {
-                val result = importBios(uri)
+                val result = importBios(uris)
                 runOnUiThread {
                     if (result != null) {
                         Toast.makeText(
@@ -43,7 +45,9 @@ class TeknoParrotBiosImportActivity : ComponentActivity() {
                     } else {
                         Toast.makeText(
                             this,
-                            "The selected file is not a valid PlayStation 2 BIOS.",
+                            "Select one valid PlayStation 2 BIOS, or both " +
+                                "${TeknoParrotBiosFiles.SYSTEM_246_PRIMARY_NAME} and " +
+                                "${TeknoParrotBiosFiles.SYSTEM_246_SECONDARY_NAME}.",
                             Toast.LENGTH_LONG,
                         ).show()
                         setResult(Activity.RESULT_CANCELED)
@@ -60,7 +64,14 @@ class TeknoParrotBiosImportActivity : ComponentActivity() {
         }
     }
 
-    private fun importBios(uri: Uri): File? = runCatching {
+    private fun importBios(uris: List<Uri>): File? =
+        if (uris.size == 1) {
+            importStandardBios(uris.single())
+        } else {
+            importSystem246SplitSet(uris)
+        }
+
+    private fun importStandardBios(uri: Uri): File? = runCatching {
         val descriptor = contentResolver.openFileDescriptor(uri, "r")
             ?: return@runCatching null
         val info = NativeApp.getBiosInfoFromFd(descriptor.detachFd())
@@ -82,7 +93,7 @@ class TeknoParrotBiosImportActivity : ComponentActivity() {
         contentResolver.openInputStream(uri)?.use { input ->
             temporary.outputStream().use(input::copyTo)
         } ?: return@runCatching null
-        if (temporary.length() !in MIN_BIOS_BYTES..MAX_BIOS_BYTES) {
+        if (!TeknoParrotBiosFiles.hasStandardBiosSize(temporary)) {
             temporary.delete()
             return@runCatching null
         }
@@ -105,16 +116,93 @@ class TeknoParrotBiosImportActivity : ComponentActivity() {
         getSharedPreferences("ARMSX2", Context.MODE_PRIVATE)
             .edit()
             .putString("bios", target.absolutePath)
-            .remove("biosDir")
+            .putString("biosDir", directory.absolutePath)
             .apply()
 
         // Keep a live frontend coherent if Android happened to retain it.
         if (MainActivityRuntime.instance != null) {
             MainActivityRuntime.bios.value = target.absolutePath
-            MainActivityRuntime.biosDir.value = null
+            MainActivityRuntime.biosDir.value = directory.absolutePath
         }
         target
     }.getOrNull()
+
+    private fun importSystem246SplitSet(uris: List<Uri>): File? = runCatching {
+        if (uris.size != 2)
+            return@runCatching null
+        val namedUris =
+            uris.mapNotNull { uri ->
+                DocumentFile.fromSingleUri(this, uri)
+                    ?.name
+                    ?.takeIf(String::isNotBlank)
+                    ?.let { it to uri }
+            }
+        val primaryUri =
+            namedUris.singleOrNull {
+                it.first.equals(
+                    TeknoParrotBiosFiles.SYSTEM_246_PRIMARY_NAME,
+                    ignoreCase = true,
+                )
+            }?.second ?: return@runCatching null
+        val secondaryUri =
+            namedUris.singleOrNull {
+                it.first.equals(
+                    TeknoParrotBiosFiles.SYSTEM_246_SECONDARY_NAME,
+                    ignoreCase = true,
+                )
+            }?.second ?: return@runCatching null
+
+        val directory =
+            MainActivityRuntime.internalBiosDir(applicationContext).apply { mkdirs() }
+        val primary =
+            File(directory, TeknoParrotBiosFiles.SYSTEM_246_PRIMARY_NAME)
+        val secondary =
+            File(directory, TeknoParrotBiosFiles.SYSTEM_246_SECONDARY_NAME)
+        val primaryTemporary = File(directory, ".${primary.name}.import")
+        val secondaryTemporary = File(directory, ".${secondary.name}.import")
+        try {
+            if (!copyChip(primaryUri, primaryTemporary) ||
+                !copyChip(secondaryUri, secondaryTemporary)
+            ) {
+                return@runCatching null
+            }
+            Files.move(
+                primaryTemporary.toPath(),
+                primary.toPath(),
+                StandardCopyOption.REPLACE_EXISTING,
+            )
+            Files.move(
+                secondaryTemporary.toPath(),
+                secondary.toPath(),
+                StandardCopyOption.REPLACE_EXISTING,
+            )
+        } finally {
+            primaryTemporary.delete()
+            secondaryTemporary.delete()
+        }
+
+        val splitSet =
+            TeknoParrotBiosFiles.findSystem246SplitSet(directory)
+                ?: return@runCatching null
+        getSharedPreferences("ARMSX2", Context.MODE_PRIVATE)
+            .edit()
+            .putString("bios", splitSet.primary.absolutePath)
+            .putString("biosDir", directory.absolutePath)
+            .apply()
+        if (MainActivityRuntime.instance != null) {
+            MainActivityRuntime.bios.value = splitSet.primary.absolutePath
+            MainActivityRuntime.biosDir.value = directory.absolutePath
+        }
+        splitSet.primary
+    }.getOrNull()
+
+    private fun copyChip(uri: Uri, destination: File): Boolean {
+        destination.delete()
+        contentResolver.openInputStream(uri)?.use { input ->
+            destination.outputStream().use(input::copyTo)
+        } ?: return false
+        return destination.length() == TeknoParrotBiosFiles.SYSTEM_246_CHIP_BYTES
+    }
 
     private fun uniqueTarget(directory: File, requestedName: String): File {
         val preferred = File(directory, requestedName)
@@ -135,9 +223,5 @@ class TeknoParrotBiosImportActivity : ComponentActivity() {
     companion object {
         private const val EXTRA_BIOS_NAME =
             "com.teknoparrot.pcsx2x6.extra.BIOS_NAME"
-        // System 2x6 arcade BIOS sets can expose a valid 2 MiB ROM image.
-        // NativeApp.getBiosInfoFromFd remains the authoritative format check.
-        private const val MIN_BIOS_BYTES = 2L * 1024L * 1024L
-        private const val MAX_BIOS_BYTES = 8L * 1024L * 1024L
     }
 }
