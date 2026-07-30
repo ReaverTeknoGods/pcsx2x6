@@ -81,6 +81,16 @@
             android:excludeFromRecents="true"
             android:theme="@style/Theme.ARMSX2" />
 
+        <!-- A clean install has no access to another package's Android/data
+             directory. TPUI launches this authenticated SAF importer so the
+             companion can validate and privately own each selected game. -->
+        <activity
+            android:name=".TeknoParrotGameImportActivity"
+            android:exported="true"
+            android:permission="com.teknoparrot.permission.BIND_BRIDGE"
+            android:excludeFromRecents="true"
+            android:theme="@style/Theme.ARMSX2" />
+
         <receiver
             android:name=".RetroAchievementsHostOverrideReceiver"
             android:exported="true">

@@ -5,10 +5,8 @@ import android.content.Context
 import android.content.Intent
 import android.os.Handler
 import android.os.Looper
-import android.os.ParcelFileDescriptor
 import android.os.Process
 import com.armsx2.runtime.MainActivityRuntime
-import kr.co.iefriends.pcsx2.NativeApp
 import java.io.File
 
 /**
@@ -39,7 +37,9 @@ class TeknoParrotSessionControlReceiver : BroadcastReceiver() {
     }
 
     private fun hasActiveUi(): Boolean =
-        MainActivityRuntime.instance != null || TeknoParrotBiosImportActivity.isActive()
+        MainActivityRuntime.instance != null ||
+            TeknoParrotBiosImportActivity.isActive() ||
+            TeknoParrotGameImportActivity.isActive()
 
     private fun sendBiosStatus(context: Context, request: Intent) {
         val callbackPackage = validatedCallbackPackage(request) ?: return
@@ -55,35 +55,12 @@ class TeknoParrotSessionControlReceiver : BroadcastReceiver() {
         println("@@TPUI_BIOS_STATUS@@ ready=$configured")
     }
 
-    /**
-     * Do not trust a non-empty preference alone. A restored Android backup can
-     * leave it pointing at a missing file, and users can accidentally select a
-     * non-BIOS image. Re-run PCSX2's native ROMVER parser for conventional PS2
-     * BIOS images. System 246/256 uses a paired 2 MiB ROM set that is not
-     * individually parseable by ROMVER, so recognize only the exact complete
-     * pair already used by the companion runtime.
-     */
+    /** Only the exact complete System 246/256 two-chip arcade set is valid. */
     private fun hasValidConfiguredBios(context: Context): Boolean = runCatching {
         val preferences =
             context.applicationContext.getSharedPreferences("ARMSX2", Context.MODE_PRIVATE)
         val biosRoot =
             MainActivityRuntime.internalBiosDir(context.applicationContext).canonicalFile
-        val path = preferences.getString("bios", null)?.takeIf(String::isNotBlank)
-        if (path != null) {
-            val canonicalFile = File(path).canonicalFile
-            if (canonicalFile.isFile &&
-                canonicalFile.parentFile == biosRoot &&
-                TeknoParrotBiosFiles.hasStandardBiosSize(canonicalFile)
-            ) {
-                val descriptor = ParcelFileDescriptor.open(
-                    canonicalFile,
-                    ParcelFileDescriptor.MODE_READ_ONLY,
-                )
-                if (NativeApp.getBiosInfoFromFd(descriptor.detachFd()) != null)
-                    return@runCatching true
-            }
-        }
-
         val splitSet =
             TeknoParrotBiosFiles.findSystem246SplitSet(biosRoot)
                 ?: return@runCatching false
@@ -183,7 +160,10 @@ class TeknoParrotSessionControlReceiver : BroadcastReceiver() {
                 return@mapNotNull null
             }
 
-            gameId
+            // TPUI profiles address the canonical manifest filename. Most are
+            // named after gameid, but returning the actual basename also keeps
+            // legacy descriptors such as "Vampire Night.acgame" discoverable.
+            manifest.nameWithoutExtension
         }.distinct().sorted()
     }
 

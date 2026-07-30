@@ -1699,7 +1699,11 @@ open class MainActivityRuntime : ComponentActivity() {
                 }
                 .orEmpty()
         val root = teknoParrotDataRoot()
-        val biosDirectory = File(root, "bios").apply { mkdirs() }
+        // BIOS import and native initialization deliberately use the stable
+        // app-owned external-files/bios directory. Looking under the mutable
+        // TeknoParrot data root here made a valid split arcade BIOS report
+        // ready, then disappear at the actual game launch on a clean install.
+        val biosDirectory = internalBiosDir(applicationContext).apply { mkdirs() }
         val preferredBios = File(biosDirectory, "r27v1602f.7d")
         val selectedBios = preferredBios.takeIf { it.isFile && it.length() > 0L }
             ?: biosDirectory.listFiles()

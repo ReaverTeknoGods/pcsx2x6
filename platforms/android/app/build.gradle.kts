@@ -19,7 +19,20 @@ val armsx2SigningProperties = Properties().apply {
         armsx2SigningPropertiesFile.inputStream().use(::load)
     }
 }
-fun armsx2SigningProperty(name: String): String? = armsx2SigningProperties.getProperty(name)?.takeIf { it.isNotBlank() }
+fun armsx2SigningProperty(name: String): String? {
+    val fileValue =
+        armsx2SigningProperties.getProperty(name)?.takeIf { it.isNotBlank() }
+    if (fileValue != null)
+        return fileValue
+    val environmentName = when (name) {
+        "storeFile" -> "ANDROID_SIGNING_STORE_FILE"
+        "storePassword" -> "ANDROID_SIGNING_STORE_PASSWORD"
+        "keyAlias" -> "ANDROID_SIGNING_KEY_ALIAS"
+        "keyPassword" -> "ANDROID_SIGNING_KEY_PASSWORD"
+        else -> return null
+    }
+    return System.getenv(environmentName)?.takeIf { it.isNotBlank() }
+}
 val armsx2PlaySigningReady = listOf("storeFile", "storePassword", "keyAlias", "keyPassword")
     .all { armsx2SigningProperty(it) != null }
 
