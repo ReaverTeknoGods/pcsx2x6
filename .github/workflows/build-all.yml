@@ -264,8 +264,10 @@ jobs:
           if [ "$REQUIRE_PRODUCTION_SIGNATURE" = "true" ]; then
             tr '[:upper:]' '[:lower:]' \
               < "$RUNNER_TEMP/pcsx2x6-signature.txt" \
-              | grep -Fq \
-                'signer #1 certificate sha-256 digest: c6d8de6b3b0847465e315b7efbe93fd58e940b7cf727b45322704c80e68ec8f1'
+              > "$RUNNER_TEMP/pcsx2x6-signature-lower.txt"
+            grep -Fq \
+              'certificate sha-256 digest: c6d8de6b3b0847465e315b7efbe93fd58e940b7cf727b45322704c80e68ec8f1' \
+              "$RUNNER_TEMP/pcsx2x6-signature-lower.txt"
           fi
 
       - name: Verify APK identity and TPUI-only manifest
