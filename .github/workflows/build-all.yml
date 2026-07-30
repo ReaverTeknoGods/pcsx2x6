@@ -1,5 +1,5 @@
-# Android-only build and rolling updater release for the dedicated ARMSX2-based
-# TeknoParrot companion branch. Desktop and iOS builds remain independent on
+# Android-only build and rolling updater release for the dedicated
+# Tekno2x6 companion branch. Desktop and iOS builds remain independent on
 # their own branches and workflows.
 name: Build Android
 
@@ -106,7 +106,7 @@ jobs:
       - name: Install Rust Android target
         run: rustup target add aarch64-linux-android
 
-      # Only pushes to the dedicated ARMSX2-based Android release branch may
+      # Only pushes to the dedicated Tekno2x6 Android release branch may
       # use the production key. The PCSX2X6 master branch remains independent,
       # and PR/other-branch artifacts stay debug-signed test builds.
       - name: Configure TeknoParrot production signing
@@ -156,6 +156,7 @@ jobs:
           CMAKE_CXX_COMPILER_LAUNCHER: ccache
         run: |
           ./gradlew :app:assembleGithubRelease --stacktrace \
+            -Parmsx2.applicationId="com.teknogods.tekno2x6" \
             -Parmsx2.versionCode="$ANDROID_VERSION_CODE" \
             -Parmsx2.versionName="$ANDROID_VERSION_NAME"
 
@@ -181,9 +182,10 @@ jobs:
           metadata_path = Path(paths[0]).resolve()
           with metadata_path.open(encoding="utf-8") as stream:
               metadata = json.load(stream)
-          if metadata.get("applicationId") != "com.armsx2":
+          if metadata.get("applicationId") != "com.teknogods.tekno2x6":
               raise SystemExit(
-                  f"applicationId mismatch: {metadata.get('applicationId')} != com.armsx2"
+                  "applicationId mismatch: "
+                  f"{metadata.get('applicationId')} != com.teknogods.tekno2x6"
               )
           if metadata.get("variantName") != "githubRelease":
               raise SystemExit(
@@ -216,7 +218,7 @@ jobs:
                   f"expected metadata to identify the only APK, found {apk_files}"
               )
           print(
-              "verified applicationId=com.armsx2 "
+              "verified applicationId=com.teknogods.tekno2x6 "
               f"variant=githubRelease versionName={expected_name} "
               f"versionCode={expected_code} outputFile={output_file}"
           )
@@ -250,10 +252,21 @@ jobs:
       - name: Verify APK signature
         env:
           APK_PATH: ${{ steps.package_apk.outputs.apk_path }}
+          REQUIRE_PRODUCTION_SIGNATURE: >-
+            ${{ github.event_name == 'push' &&
+                github.repository == 'ReaverTeknoGods/pcsx2x6' &&
+                github.ref == 'refs/heads/codex/android-port' }}
         run: |
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
           test -x "$APKSIGNER"
-          "$APKSIGNER" verify --verbose --print-certs "$APK_PATH"
+          "$APKSIGNER" verify --verbose --print-certs "$APK_PATH" \
+            | tee "$RUNNER_TEMP/pcsx2x6-signature.txt"
+          if [ "$REQUIRE_PRODUCTION_SIGNATURE" = "true" ]; then
+            tr '[:upper:]' '[:lower:]' \
+              < "$RUNNER_TEMP/pcsx2x6-signature.txt" \
+              | grep -Fq \
+                'signer #1 certificate sha-256 digest: c6d8de6b3b0847465e315b7efbe93fd58e940b7cf727b45322704c80e68ec8f1'
+          fi
 
       - name: Verify APK identity and TPUI-only manifest
         env:
@@ -265,7 +278,7 @@ jobs:
           test -x "$AAPT2"
           "$AAPT2" dump badging "$APK_PATH" > "$RUNNER_TEMP/pcsx2x6-badging.txt"
           grep -Fq \
-            "package: name='com.armsx2' versionCode='$ANDROID_VERSION_CODE' versionName='$ANDROID_VERSION_NAME'" \
+            "package: name='com.teknogods.tekno2x6' versionCode='$ANDROID_VERSION_CODE' versionName='$ANDROID_VERSION_NAME'" \
             "$RUNNER_TEMP/pcsx2x6-badging.txt"
           grep -Fxq "native-code: 'arm64-v8a'" "$RUNNER_TEMP/pcsx2x6-badging.txt"
 

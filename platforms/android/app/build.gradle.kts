@@ -11,7 +11,8 @@ val armsx2NativeLibName = providers.gradleProperty("armsx2.nativeLibName").orEls
 val armsx2Pgo = providers.gradleProperty("armsx2.pgo").orElse("none") // none | generate | optimize
 val armsx2PgoProfile = providers.gradleProperty("armsx2.pgoProfile").orElse("") // abs path to merged .profdata (optimize)
 val armsx2HostPageSize = providers.gradleProperty("armsx2.hostPageSize").orElse("0x1000")
-val armsx2ApplicationId = providers.gradleProperty("armsx2.applicationId").orElse("com.armsx2")
+val armsx2ApplicationId = providers.gradleProperty("armsx2.applicationId")
+    .orElse("com.teknogods.tekno2x6")
 val armsx2SigningPropertiesFile = rootProject.file("armsx2_keystore.properties")
 val armsx2SigningProperties = Properties().apply {
     if (armsx2SigningPropertiesFile.isFile) {
@@ -86,10 +87,9 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            // Sign release with the debug keystore so it's installable on-device
-            // without a separate signing config. NOT for distribution — the debug
-            // keystore is well-known and not secure for Play Store uploads.
-            // Replace with a real release signingConfig before publishing.
+            // Local release builds remain installable with the debug key. The
+            // dedicated rolling-release workflow injects the TeknoParrot
+            // production key and rejects any APK whose certificate differs.
             signingConfig = if (armsx2PlaySigningReady) {
                 signingConfigs.getByName("playRelease")
             } else {
