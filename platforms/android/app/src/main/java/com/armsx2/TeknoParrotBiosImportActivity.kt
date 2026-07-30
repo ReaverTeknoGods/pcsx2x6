@@ -135,7 +135,9 @@ class TeknoParrotBiosImportActivity : ComponentActivity() {
     companion object {
         private const val EXTRA_BIOS_NAME =
             "com.teknoparrot.pcsx2x6.extra.BIOS_NAME"
-        private const val MIN_BIOS_BYTES = 4L * 1024L * 1024L
+        // System 2x6 arcade BIOS sets can expose a valid 2 MiB ROM image.
+        // NativeApp.getBiosInfoFromFd remains the authoritative format check.
+        private const val MIN_BIOS_BYTES = 2L * 1024L * 1024L
         private const val MAX_BIOS_BYTES = 8L * 1024L * 1024L
     }
 }

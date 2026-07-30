@@ -213,7 +213,9 @@ class TeknoParrotSessionControlReceiver : BroadcastReceiver() {
             "com.teknoparrot.pcsx2x6.extra.GAME_IDS"
         private const val EXTRA_BIOS_READY =
             "com.teknoparrot.pcsx2x6.extra.BIOS_READY"
-        private const val MIN_BIOS_BYTES = 4L * 1024L * 1024L
+        // Accept the 2 MiB System 2x6 ROM form; the native parser below still
+        // rejects arbitrary files before reporting BIOS readiness.
+        private const val MIN_BIOS_BYTES = 2L * 1024L * 1024L
         private const val MAX_BIOS_BYTES = 8L * 1024L * 1024L
         private val GAME_ID = Regex("""NM\d{5}(?:_[A-Za-z0-9]+)?""")
         private val SAFE_NAME = Regex("""[A-Za-z0-9_. -]+""")
