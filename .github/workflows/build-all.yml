@@ -423,3 +423,49 @@ jobs:
               f"size={expected_size} digest={expected_digest}"
           )
           PY
+
+      - name: Announce Tekno2x6 release on Discord
+        if: >-
+          github.event_name == 'push' &&
+          github.repository == 'ReaverTeknoGods/pcsx2x6' &&
+          github.ref == 'refs/heads/codex/android-port'
+        shell: bash
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_ANDROID_RELEASE_WEBHOOK }}
+          RELEASE_VERSION: ${{ steps.android_version.outputs.name }}
+          RELEASE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/tag/pcsx2x6-android
+        run: |
+          set -euo pipefail
+          if [[ -z "$DISCORD_WEBHOOK_URL" ]]; then
+            echo "::error::DISCORD_ANDROID_RELEASE_WEBHOOK is not configured"
+            exit 1
+          fi
+
+          payload=$(jq -n \
+            --arg version "$RELEASE_VERSION" \
+            --arg url "$RELEASE_URL" \
+            --arg sha "$GITHUB_SHA" \
+            '{
+              username: "TeknoParrot Releases",
+              allowed_mentions: {parse: []},
+              embeds: [{
+                title: ("Tekno2x6 Android " + $version + " released"),
+                url: $url,
+                description: "A new signed Android ARM64 Tekno2x6 module is available through the TeknoParrot updater.",
+                color: 5763719,
+                fields: [{
+                  name: "Commit",
+                  value: ("`" + $sha[0:7] + "`"),
+                  inline: true
+                }]
+              }]
+            }')
+
+          curl --fail-with-body \
+            --retry 3 \
+            --retry-all-errors \
+            --connect-timeout 10 \
+            --max-time 30 \
+            -H "Content-Type: application/json" \
+            --data-binary "$payload" \
+            "${DISCORD_WEBHOOK_URL}?wait=true"
