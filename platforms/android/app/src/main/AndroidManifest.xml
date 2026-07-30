@@ -71,6 +71,16 @@
             android:exported="false"
             android:targetActivity=".Main" />
 
+        <!-- TPUI owns the user-facing BIOS-required dialog. This narrow,
+             signature-protected activity only validates and imports the file
+             selected through Android's document picker. -->
+        <activity
+            android:name=".TeknoParrotBiosImportActivity"
+            android:exported="true"
+            android:permission="com.teknoparrot.permission.BIND_BRIDGE"
+            android:excludeFromRecents="true"
+            android:theme="@style/Theme.ARMSX2" />
+
         <receiver
             android:name=".RetroAchievementsHostOverrideReceiver"
             android:exported="true">
@@ -88,6 +98,7 @@
                 <action android:name="com.teknoparrot.pcsx2x6.action.QUERY_SESSION" />
                 <action android:name="com.teknoparrot.pcsx2x6.action.STOP_GAME" />
                 <action android:name="com.teknoparrot.pcsx2x6.action.QUERY_CATALOG" />
+                <action android:name="com.teknoparrot.pcsx2x6.action.QUERY_BIOS" />
             </intent-filter>
         </receiver>
     </application>

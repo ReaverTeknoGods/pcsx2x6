@@ -5,8 +5,10 @@ import android.content.Context
 import android.content.Intent
 import android.os.Handler
 import android.os.Looper
+import android.os.ParcelFileDescriptor
 import android.os.Process
 import com.armsx2.runtime.MainActivityRuntime
+import kr.co.iefriends.pcsx2.NativeApp
 import java.io.File
 
 /**
@@ -16,10 +18,11 @@ import java.io.File
  */
 class TeknoParrotSessionControlReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
-        if (intent?.action == ACTION_QUERY_CATALOG)
-            sendReadyCatalog(context, intent)
-        else
-            MainActivityRuntime.handleTeknoParrotSessionControl(context, intent)
+        when (intent?.action) {
+            ACTION_QUERY_CATALOG -> sendReadyCatalog(context, intent)
+            ACTION_QUERY_BIOS -> sendBiosStatus(context, intent)
+            else -> MainActivityRuntime.handleTeknoParrotSessionControl(context, intent)
+        }
         // A health query can cold-start the package after Android killed or the
         // user force-stopped the emulator. Once the terminal reply is queued,
         // do not retain an otherwise empty ~80 MB frontend process. Recheck
@@ -35,20 +38,52 @@ class TeknoParrotSessionControlReceiver : BroadcastReceiver() {
         }
     }
 
+    private fun sendBiosStatus(context: Context, request: Intent) {
+        val callbackPackage = validatedCallbackPackage(request) ?: return
+        val token = validatedToken(request) ?: return
+        val configured = hasValidConfiguredBios(context)
+
+        context.applicationContext.sendBroadcast(
+            Intent(ACTION_BIOS_STATUS)
+                .setPackage(callbackPackage)
+                .putExtra(EXTRA_SESSION_TOKEN, token)
+                .putExtra(EXTRA_BIOS_READY, configured)
+        )
+        println("@@TPUI_BIOS_STATUS@@ ready=$configured")
+    }
+
+    /**
+     * Do not trust a non-empty preference alone. A restored Android backup can
+     * leave it pointing at a missing file, and users can accidentally select a
+     * non-BIOS image. Re-run PCSX2's native ROMVER parser before TPUI launches
+     * any arcade manifest.
+     */
+    private fun hasValidConfiguredBios(context: Context): Boolean = runCatching {
+        val preferences =
+            context.applicationContext.getSharedPreferences("ARMSX2", Context.MODE_PRIVATE)
+        val path = preferences.getString("bios", null)?.takeIf(String::isNotBlank)
+            ?: return@runCatching false
+        val file = File(path)
+        val biosRoot =
+            MainActivityRuntime.internalBiosDir(context.applicationContext).canonicalFile
+        val canonicalFile = file.canonicalFile
+        if (!canonicalFile.isFile ||
+            canonicalFile.length() !in MIN_BIOS_BYTES..MAX_BIOS_BYTES ||
+            canonicalFile.parentFile != biosRoot
+        ) {
+            return@runCatching false
+        }
+
+        val descriptor = ParcelFileDescriptor.open(
+            canonicalFile,
+            ParcelFileDescriptor.MODE_READ_ONLY,
+        )
+        NativeApp.getBiosInfoFromFd(descriptor.detachFd()) != null
+    }.getOrDefault(false)
+
     private fun sendReadyCatalog(context: Context, request: Intent) {
-        val callbackPackage =
-            request.getStringExtra(EXTRA_CALLBACK_PACKAGE)
-                ?.takeIf { it == TPUI_PACKAGE }
-                ?: return
-        val token =
-            request.getStringExtra(EXTRA_SESSION_TOKEN)
-                ?.takeIf {
-                    it.length in 32..128 &&
-                        it.all { character ->
-                            character.isLetterOrDigit() || character == '-' || character == '_'
-                        }
-                }
-                ?: return
+        val callbackPackage = validatedCallbackPackage(request) ?: return
+        val token = validatedToken(request) ?: return
         val gameIds = findReadyGameIds(context)
 
         context.applicationContext.sendBroadcast(
@@ -59,6 +94,19 @@ class TeknoParrotSessionControlReceiver : BroadcastReceiver() {
         )
         println("@@TPUI_CATALOG@@ ready=${gameIds.size}")
     }
+
+    private fun validatedCallbackPackage(request: Intent): String? =
+        request.getStringExtra(EXTRA_CALLBACK_PACKAGE)
+            ?.takeIf { it == TPUI_PACKAGE }
+
+    private fun validatedToken(request: Intent): String? =
+        request.getStringExtra(EXTRA_SESSION_TOKEN)
+            ?.takeIf {
+                it.length in 32..128 &&
+                    it.all { character ->
+                        character.isLetterOrDigit() || character == '-' || character == '_'
+                    }
+            }
 
     private fun findReadyGameIds(context: Context): List<String> {
         val externalRoot = context.getExternalFilesDir(null) ?: return emptyList()
@@ -153,12 +201,20 @@ class TeknoParrotSessionControlReceiver : BroadcastReceiver() {
             "com.teknoparrot.pcsx2x6.action.QUERY_CATALOG"
         private const val ACTION_CATALOG_STATUS =
             "com.teknoparrot.pcsx2x6.action.CATALOG_STATUS"
+        private const val ACTION_QUERY_BIOS =
+            "com.teknoparrot.pcsx2x6.action.QUERY_BIOS"
+        private const val ACTION_BIOS_STATUS =
+            "com.teknoparrot.pcsx2x6.action.BIOS_STATUS"
         private const val EXTRA_CALLBACK_PACKAGE =
             "com.teknoparrot.pcsx2x6.extra.CALLBACK_PACKAGE"
         private const val EXTRA_SESSION_TOKEN =
             "com.teknoparrot.pcsx2x6.extra.SESSION_TOKEN"
         private const val EXTRA_GAME_IDS =
             "com.teknoparrot.pcsx2x6.extra.GAME_IDS"
+        private const val EXTRA_BIOS_READY =
+            "com.teknoparrot.pcsx2x6.extra.BIOS_READY"
+        private const val MIN_BIOS_BYTES = 4L * 1024L * 1024L
+        private const val MAX_BIOS_BYTES = 8L * 1024L * 1024L
         private val GAME_ID = Regex("""NM\d{5}(?:_[A-Za-z0-9]+)?""")
         private val SAFE_NAME = Regex("""[A-Za-z0-9_. -]+""")
     }
