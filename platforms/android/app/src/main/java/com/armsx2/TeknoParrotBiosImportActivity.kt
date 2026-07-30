@@ -15,6 +15,7 @@ import kr.co.iefriends.pcsx2.NativeApp
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Single-purpose, signature-protected BIOS picker used by TeknoParrotUI.
@@ -58,10 +59,16 @@ class TeknoParrotBiosImportActivity : ComponentActivity() {
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        activeInstances.incrementAndGet()
         super.onCreate(savedInstanceState)
         if (savedInstanceState == null) {
             picker.launch(arrayOf("application/octet-stream", "application/x-bios"))
         }
+    }
+
+    override fun onDestroy() {
+        activeInstances.decrementAndGet()
+        super.onDestroy()
     }
 
     private fun importBios(uris: List<Uri>): File? =
@@ -221,6 +228,15 @@ class TeknoParrotBiosImportActivity : ComponentActivity() {
     }
 
     companion object {
+        /**
+         * The system document picker covers this activity while the BIOS files
+         * are selected. Session health queries must not treat the companion
+         * process as idle and kill it while that result is still pending.
+         */
+        private val activeInstances = AtomicInteger()
+
+        internal fun isActive(): Boolean = activeInstances.get() > 0
+
         private const val EXTRA_BIOS_NAME =
             "com.teknoparrot.pcsx2x6.extra.BIOS_NAME"
     }

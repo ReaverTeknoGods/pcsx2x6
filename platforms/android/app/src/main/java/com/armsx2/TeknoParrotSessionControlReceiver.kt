@@ -28,15 +28,18 @@ class TeknoParrotSessionControlReceiver : BroadcastReceiver() {
         // do not retain an otherwise empty ~80 MB frontend process. Recheck
         // after a short grace period so a simultaneous real Activity launch is
         // never terminated.
-        if (MainActivityRuntime.instance == null) {
+        if (!hasActiveUi()) {
             val pendingResult = goAsync()
             Handler(Looper.getMainLooper()).postDelayed({
                 pendingResult.finish()
-                if (MainActivityRuntime.instance == null)
+                if (!hasActiveUi())
                     Process.killProcess(Process.myPid())
             }, 250L)
         }
     }
+
+    private fun hasActiveUi(): Boolean =
+        MainActivityRuntime.instance != null || TeknoParrotBiosImportActivity.isActive()
 
     private fun sendBiosStatus(context: Context, request: Intent) {
         val callbackPackage = validatedCallbackPackage(request) ?: return
