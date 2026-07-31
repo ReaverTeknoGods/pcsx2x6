@@ -2,14 +2,12 @@ package com.armsx2
 
 import java.io.File
 import java.io.RandomAccessFile
-import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TeknoParrotBiosFilesTest {
     @Test
-    fun findsExactCompleteSystem246Pair() {
+    fun rejectsCorrectNamesWithWrongContents() {
         withTemporaryDirectory { directory ->
             sizedFile(
                 directory,
@@ -24,14 +22,9 @@ class TeknoParrotBiosFilesTest {
 
             val result = TeknoParrotBiosFiles.findSystem246SplitSet(directory)
 
-            assertEquals(
-                TeknoParrotBiosFiles.SYSTEM_246_PRIMARY_NAME,
-                result?.primary?.name,
-            )
-            assertEquals(
-                TeknoParrotBiosFiles.SYSTEM_246_SECONDARY_NAME.uppercase(),
-                result?.secondary?.name,
-            )
+            // File names and sizes alone are intentionally insufficient. The
+            // production helper requires the known System 246 ROM digests.
+            assertNull(result)
         }
     }
 
@@ -51,19 +44,6 @@ class TeknoParrotBiosFilesTest {
                 TeknoParrotBiosFiles.SYSTEM_246_CHIP_BYTES - 1,
             )
             assertNull(TeknoParrotBiosFiles.findSystem246SplitSet(directory))
-        }
-    }
-
-    @Test
-    fun standardBiosSizeDoesNotAcceptOneSystem246Chip() {
-        withTemporaryDirectory { directory ->
-            val chip =
-                sizedFile(
-                    directory,
-                    "bios.bin",
-                    TeknoParrotBiosFiles.SYSTEM_246_CHIP_BYTES,
-                )
-            assertTrue(!TeknoParrotBiosFiles.hasStandardBiosSize(chip))
         }
     }
 

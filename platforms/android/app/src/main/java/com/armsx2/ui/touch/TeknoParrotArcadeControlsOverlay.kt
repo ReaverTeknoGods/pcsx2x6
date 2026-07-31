@@ -54,6 +54,7 @@ fun TeknoParrotArcadeControlsOverlay() {
     // but companion mode replaces that composable entirely.
     TouchControls.ensureLoaded()
     val gameId = MainActivityRuntime.teknoParrotGameId
+    val profileName = MainActivityRuntime.teknoParrotProfileName
     val running = MainActivityRuntime.eState.value == EmuState.RUNNING ||
         MainActivityRuntime.eState.value == EmuState.PAUSED
     if (!running ||
@@ -66,13 +67,14 @@ fun TeknoParrotArcadeControlsOverlay() {
         return
     }
 
-    DisposableEffect(gameId) {
+    DisposableEffect(gameId, profileName) {
         onDispose { NativeApp.clearTeknoParrotOverlayInput() }
     }
 
     BoxWithConstraints {
         val driving = TeknoParrotArcadeInput.isDrivingGame(gameId)
-        val lightgun = TeknoParrotArcadeInput.isLightgunGame(gameId)
+        val lightgun =
+            TeknoParrotArcadeInput.isLightgunGame(gameId, profileName)
         val battleGear = TeknoParrotArcadeInput.isBattleGearGame(gameId)
         val zoids = TeknoParrotArcadeInput.isZoidsGame(gameId)
         val drum = TeknoParrotArcadeInput.isDrumGame(gameId)
@@ -351,7 +353,17 @@ object TeknoParrotArcadeInput {
     private val classicDrivingGames = setOf("NM00001", "NM00005", "NM00008", "NM00047")
     private val battleGearGames = setOf("NM00010", "NM00015")
     fun isDrivingGame(gameId: String): Boolean = gameId in drivingGames
-    fun isLightgunGame(gameId: String): Boolean = gameId in lightgunGames
+    fun isLightgunGame(gameId: String, profileName: String = ""): Boolean {
+        // NM00003 is shared by the current Technic Beat catalog entry and a
+        // legacy Vampire Night entry. TPUI supplies the profile name for
+        // companion launches, so keep Technic Beat on its three-button cabinet
+        // surface without removing Vampire Night's lightgun compatibility.
+        if (profileName.equals("technicb", ignoreCase = true))
+            return false
+        if (profileName.equals("vnight", ignoreCase = true))
+            return true
+        return gameId in lightgunGames
+    }
     fun isBattleGearGame(gameId: String): Boolean = gameId in battleGearGames
     fun isZoidsGame(gameId: String): Boolean = gameId in zoidsGames
     fun isDrumGame(gameId: String): Boolean = gameId in drumGames
