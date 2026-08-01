@@ -2793,7 +2793,7 @@ open class MainActivityRuntime : ComponentActivity() {
                 return true
             }
             val arcadeButton =
-                arcadeInput.gamepadButton(teknoParrotGameId, kc)
+                arcadeInput.gamepadButton(teknoParrotGameId, kc, teknoParrotProfileName)
             if (arcadeButton != null) {
                 when (event.action) {
                     KeyEvent.ACTION_DOWN ->

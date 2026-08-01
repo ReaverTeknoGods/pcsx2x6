@@ -90,6 +90,7 @@ fun TeknoParrotArcadeControlsOverlay() {
             val aimWidth = maxWidth * 0.64f
             val aimHeight = maxHeight * 0.68f
             val pedalSize = shortSide * 0.13f
+            val selectSize = shortSide * 0.10f
             LightgunAimSurface(
                 gameId,
                 Modifier.positionAt(
@@ -98,8 +99,8 @@ fun TeknoParrotArcadeControlsOverlay() {
                 ),
             )
             ArcadeButton(
-                "PEDAL",
-                TeknoParrotArcadeInput.lightgunPedalButton(gameId),
+                TeknoParrotArcadeInput.lightgunAuxiliaryLabel(gameId, profileName),
+                TeknoParrotArcadeInput.lightgunAuxiliaryButton(gameId, profileName),
                 pedalSize,
                 RoundedCornerShape(12.dp),
                 Modifier.positionAt(
@@ -107,6 +108,22 @@ fun TeknoParrotArcadeControlsOverlay() {
                     pedalSize, pedalSize,
                 ),
                 fontSize = 9.sp,
+            )
+            ArcadeButton(
+                "▲", TeknoParrotArcadeInput.UP, selectSize, CircleShape,
+                Modifier.positionAt(
+                    maxWidth, maxHeight, 0.90f, 0.43f,
+                    selectSize, selectSize,
+                ),
+                fontSize = 13.sp,
+            )
+            ArcadeButton(
+                "▼", TeknoParrotArcadeInput.DOWN, selectSize, CircleShape,
+                Modifier.positionAt(
+                    maxWidth, maxHeight, 0.90f, 0.56f,
+                    selectSize, selectSize,
+                ),
+                fontSize = 13.sp,
             )
         } else if (driving) {
             val wheelSize = shortSide * 0.34f
@@ -239,8 +256,8 @@ fun TeknoParrotArcadeControlsOverlay() {
             fontSize = 11.sp,
         )
         ArcadeButton(
-            if (drum) "ENTER" else "START",
-            if (drum) TeknoParrotArcadeInput.BUTTON_1 else TeknoParrotArcadeInput.START,
+            if (drum || lightgun) "ENTER" else "START",
+            if (drum || lightgun) TeknoParrotArcadeInput.BUTTON_1 else TeknoParrotArcadeInput.START,
             menuWidth, RoundedCornerShape(12.dp),
             Modifier
                 .positionAt(maxWidth, maxHeight, 0.55f, 0.91f, menuWidth, menuHeight)
@@ -336,6 +353,20 @@ object TeknoParrotArcadeInput {
     const val AXIS_DRUM_P1_RIGHT_RIM = AXIS_DRUM_BASE + 4
     const val AXIS_DRUM_P1_LEFT_RIM = AXIS_DRUM_BASE + 5
 
+    // Every System 246/256 game ID currently exposed by TeknoParrotUI. Keep
+    // this catalog explicit so a new title cannot silently inherit the generic
+    // two-button overlay without a cabinet-layout review.
+    val supportedGameIds = setOf(
+        "NM00001", "NM00002", "NM00003", "NM00004", "NM00005", "NM00006",
+        "NM00007", "NM00008", "NM00009", "NM00010", "NM00011", "NM00012",
+        "NM00013", "NM00015", "NM00016", "NM00017", "NM00018", "NM00019",
+        "NM00021", "NM00023", "NM00024", "NM00025", "NM00026", "NM00027",
+        "NM00029", "NM00030", "NM00031", "NM00032", "NM00033", "NM00034",
+        "NM00035", "NM00037", "NM00038", "NM00039", "NM00040", "NM00041",
+        "NM00042", "NM00043", "NM00044", "NM00047", "NM00048", "NM00051",
+        "NM00052", "NM00056", "NM00057",
+    )
+
     fun set(button: Int, pressed: Boolean) {
         NativeApp.setTeknoParrotOverlayButton(button, pressed)
     }
@@ -349,8 +380,13 @@ object TeknoParrotArcadeInput {
     )
     private val lightgunGames = setOf("NM00003", "NM00012", "NM00021", "NM00032")
     private val zoidsGames = setOf("NM00016", "NM00025")
-    private val drumGames = setOf("NM00023", "NM00033")
-    private val classicDrivingGames = setOf("NM00001", "NM00005", "NM00008", "NM00047")
+    private val drumGames = setOf(
+        "NM00023", "NM00033", "NM00038", "NM00041",
+        "NM00044", "NM00051", "NM00056", "NM00057",
+    )
+    private val classicDrivingGames = setOf(
+        "NM00001", "NM00005", "NM00008", "NM00039", "NM00047",
+    )
     private val battleGearGames = setOf("NM00010", "NM00015")
     fun isDrivingGame(gameId: String): Boolean = gameId in drivingGames
     fun isLightgunGame(gameId: String, profileName: String = ""): Boolean {
@@ -371,10 +407,17 @@ object TeknoParrotArcadeInput {
         "NM00021", "NM00032" -> LEFT
         else -> BUTTON_2
     }
-    fun lightgunPedalButton(gameId: String): Int = when (gameId) {
-        "NM00012" -> BUTTON_6
+    fun lightgunAuxiliaryButton(gameId: String, profileName: String = ""): Int = when {
+        gameId == "NM00003" && profileName.equals("vnight", ignoreCase = true) -> BUTTON_3
+        gameId == "NM00012" -> BUTTON_6
         else -> BUTTON_3
     }
+
+    fun lightgunAuxiliaryLabel(gameId: String, profileName: String = ""): String =
+        if (gameId == "NM00003" && profileName.equals("vnight", ignoreCase = true))
+            "START"
+        else
+            "PEDAL"
 
     fun gamepadDrumAxis(gameId: String, keyCode: Int): Int? {
         if (!isDrumGame(gameId))
@@ -422,9 +465,15 @@ object TeknoParrotArcadeInput {
      * ACJV's official-PS2-port rows rather than assuming every title uses the
      * same switch numbering.
      */
-    fun gamepadButton(gameId: String, keyCode: Int): Int? {
+    fun gamepadButton(gameId: String, keyCode: Int, profileName: String = ""): Int? {
+        val lightgun = isLightgunGame(gameId, profileName)
         return when (keyCode) {
-            KeyEvent.KEYCODE_BUTTON_START -> if (isDrumGame(gameId)) BUTTON_1 else START
+            KeyEvent.KEYCODE_BUTTON_START -> when {
+                isDrumGame(gameId) -> BUTTON_1
+                lightgun && gameId == "NM00003" -> BUTTON_3
+                lightgun -> BUTTON_1
+                else -> START
+            }
             KeyEvent.KEYCODE_BUTTON_SELECT -> COIN
             KeyEvent.KEYCODE_DPAD_UP ->
                 if (isZoidsGame(gameId)) zoidsMoveButton(UP) else UP
@@ -440,20 +489,21 @@ object TeknoParrotArcadeInput {
                 gameId == "NM00030" -> BUTTON_1
                 else -> BUTTON_1
             }
-            KeyEvent.KEYCODE_BUTTON_Y -> when (gameId) {
-                "NM00037" -> DOWN
-                "NM00016", "NM00025" -> BUTTON_9
-                "NM00030" -> BUTTON_2
-                "NM00047" -> BUTTON_9
-                "NM00001", "NM00005", "NM00008" -> BUTTON_2
-                "NM00010", "NM00015" -> DOWN
-                "NM00002" -> BUTTON_4
+            KeyEvent.KEYCODE_BUTTON_Y -> when {
+                lightgun -> lightgunTriggerButton(gameId)
+                gameId == "NM00037" -> DOWN
+                gameId == "NM00016" || gameId == "NM00025" -> BUTTON_9
+                gameId == "NM00030" -> BUTTON_2
+                gameId == "NM00047" -> BUTTON_9
+                gameId in setOf("NM00001", "NM00005", "NM00008", "NM00039") -> BUTTON_2
+                gameId == "NM00010" || gameId == "NM00015" -> DOWN
+                gameId == "NM00002" -> BUTTON_4
                 else -> BUTTON_2
             }
             KeyEvent.KEYCODE_BUTTON_A -> when {
+                lightgun -> lightgunAuxiliaryButton(gameId, profileName)
                 gameId == "NM00037" -> LEFT
                 isZoidsGame(gameId) -> BUTTON_8
-                gameId == "NM00003" -> BUTTON_3
                 gameId in tekkenGames -> BUTTON_4
                 gameId in gundamGames -> BUTTON_3
                 gameId in soulCaliburGames -> BUTTON_4
@@ -463,6 +513,7 @@ object TeknoParrotArcadeInput {
                 else -> BUTTON_1
             }
             KeyEvent.KEYCODE_BUTTON_B -> when {
+                lightgun -> lightgunTriggerButton(gameId)
                 gameId == "NM00037" -> RIGHT
                 isZoidsGame(gameId) -> BUTTON_7
                 gameId in tekkenGames -> BUTTON_5
@@ -476,6 +527,7 @@ object TeknoParrotArcadeInput {
                 else -> BUTTON_2
             }
             KeyEvent.KEYCODE_BUTTON_L1 -> when {
+                lightgun -> lightgunAuxiliaryButton(gameId, profileName)
                 gameId in sixButtonGames -> BUTTON_3
                 gameId in zoidsGames -> BUTTON_4
                 gameId in classicDrivingGames -> BUTTON_4
@@ -483,6 +535,7 @@ object TeknoParrotArcadeInput {
                 else -> BUTTON_5
             }
             KeyEvent.KEYCODE_BUTTON_R1 -> when {
+                lightgun -> lightgunTriggerButton(gameId)
                 gameId in zoidsGames -> BUTTON_5
                 gameId in classicDrivingGames -> BUTTON_3
                 gameId in battleGearGames -> RIGHT
@@ -493,14 +546,14 @@ object TeknoParrotArcadeInput {
     }
 }
 
-private data class ArcadeActionButton(
+internal data class ArcadeActionButton(
     val label: String,
     val button: Int,
     val x: Float,
     val y: Float,
 )
 
-private fun actionButtonsFor(gameId: String): List<ArcadeActionButton> {
+internal fun actionButtonsFor(gameId: String): List<ArcadeActionButton> {
     fun two(labels: List<String>, buttons: List<Int>) = listOf(
         ArcadeActionButton(labels[0], buttons[0], 0.80f, 0.68f),
         ArcadeActionButton(labels[1], buttons[1], 0.91f, 0.54f),
@@ -513,7 +566,8 @@ private fun actionButtonsFor(gameId: String): List<ArcadeActionButton> {
     )
 
     return when (gameId) {
-        "NM00023", "NM00033" -> emptyList()
+        "NM00023", "NM00033", "NM00038", "NM00041",
+        "NM00044", "NM00051", "NM00056", "NM00057" -> emptyList()
         "NM00037" -> four(
             listOf("1", "2", "3", "4"),
             listOf(
@@ -592,7 +646,7 @@ private fun actionButtonsFor(gameId: String): List<ArcadeActionButton> {
             ArcadeActionButton("GEAR+", TeknoParrotArcadeInput.BUTTON_3, 0.91f, 0.38f),
             ArcadeActionButton("GEAR-", TeknoParrotArcadeInput.BUTTON_4, 0.79f, 0.48f),
         )
-        "NM00001", "NM00005", "NM00008" -> listOf(
+        "NM00001", "NM00005", "NM00008", "NM00039" -> listOf(
             ArcadeActionButton("ENTER", TeknoParrotArcadeInput.BUTTON_1, 0.69f, 0.38f),
             ArcadeActionButton("VIEW", TeknoParrotArcadeInput.BUTTON_2, 0.80f, 0.31f),
             ArcadeActionButton("GEAR+", TeknoParrotArcadeInput.BUTTON_3, 0.91f, 0.38f),
@@ -609,9 +663,34 @@ private fun actionButtonsFor(gameId: String): List<ArcadeActionButton> {
             ArcadeActionButton("ROCKET", TeknoParrotArcadeInput.BUTTON_8, 0.65f, 0.51f),
             ArcadeActionButton("R-LOAD", TeknoParrotArcadeInput.BUTTON_7, 0.74f, 0.41f),
         )
-        "NM00002", "NM00007", "NM00013", "NM00017", "NM00024",
-        "NM00031", "NM00034",
-        "NM00042", "NM00043", "NM00048", "NM00052" -> four(
+        "NM00013", "NM00017", "NM00024", "NM00034", "NM00043", "NM00052" -> four(
+            listOf("GUN", "SWORD", "JUMP", "TARGET"),
+            listOf(
+                TeknoParrotArcadeInput.BUTTON_1,
+                TeknoParrotArcadeInput.BUTTON_2,
+                TeknoParrotArcadeInput.BUTTON_3,
+                TeknoParrotArcadeInput.BUTTON_4,
+            ),
+        )
+        "NM00042" -> four(
+            listOf("ATTACK", "SPECIAL", "LAUNCH", "BASARA"),
+            listOf(
+                TeknoParrotArcadeInput.BUTTON_1,
+                TeknoParrotArcadeInput.BUTTON_2,
+                TeknoParrotArcadeInput.BUTTON_3,
+                TeknoParrotArcadeInput.BUTTON_4,
+            ),
+        )
+        "NM00048" -> four(
+            listOf("LIGHT", "MEDIUM", "HEAVY", "PARRY"),
+            listOf(
+                TeknoParrotArcadeInput.BUTTON_1,
+                TeknoParrotArcadeInput.BUTTON_2,
+                TeknoParrotArcadeInput.BUTTON_3,
+                TeknoParrotArcadeInput.BUTTON_4,
+            ),
+        )
+        "NM00002", "NM00007", "NM00031" -> four(
             listOf("1", "2", "3", "4"),
             listOf(
                 TeknoParrotArcadeInput.BUTTON_1,
