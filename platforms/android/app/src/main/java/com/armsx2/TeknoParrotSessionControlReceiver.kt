@@ -3,9 +3,6 @@ package com.armsx2
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.os.Handler
-import android.os.Looper
-import android.os.Process
 import com.armsx2.runtime.MainActivityRuntime
 import java.io.File
 
@@ -21,25 +18,11 @@ class TeknoParrotSessionControlReceiver : BroadcastReceiver() {
             ACTION_QUERY_BIOS -> sendBiosStatus(context, intent)
             else -> MainActivityRuntime.handleTeknoParrotSessionControl(context, intent)
         }
-        // A health query can cold-start the package after Android killed or the
-        // user force-stopped the emulator. Once the terminal reply is queued,
-        // do not retain an otherwise empty ~80 MB frontend process. Recheck
-        // after a short grace period so a simultaneous real Activity launch is
-        // never terminated.
-        if (!hasActiveUi()) {
-            val pendingResult = goAsync()
-            Handler(Looper.getMainLooper()).postDelayed({
-                pendingResult.finish()
-                if (!hasActiveUi())
-                    Process.killProcess(Process.myPid())
-            }, 250L)
-        }
+        // Do not kill this process after replying. Android marks a receiver-only
+        // process as cached and can reclaim it itself. A timer-driven hard kill
+        // races TPUI's catalog -> BIOS -> launch sequence and was the source of
+        // intermittent second-launch preflight timeouts.
     }
-
-    private fun hasActiveUi(): Boolean =
-        MainActivityRuntime.instance != null ||
-            TeknoParrotBiosImportActivity.isActive() ||
-            TeknoParrotGameImportActivity.isActive()
 
     private fun sendBiosStatus(context: Context, request: Intent) {
         val callbackPackage = validatedCallbackPackage(request) ?: return
@@ -147,9 +130,7 @@ class TeknoParrotSessionControlReceiver : BroadcastReceiver() {
                         }
                 }
             val dataDirectory = File(gameRoot, subdir)
-            val requiredFiles =
-                requiredNames.map { File(dataDirectory, it) } +
-                    File(dataDirectory, "sram.bin")
+            val requiredFiles = requiredNames.map { File(dataDirectory, it) }
             val missing = requiredFiles.firstOrNull { !it.isFile || it.length() <= 0L }
             if (missing != null) {
                 println(
@@ -159,6 +140,18 @@ class TeknoParrotSessionControlReceiver : BroadcastReceiver() {
                 )
                 return@mapNotNull null
             }
+
+            val sramName = values["data.sram"] ?: "sram.bin"
+            val sram = runCatching {
+                TeknoParrotArcadeStorage.ensureBlankSram(dataDirectory, sramName)
+            }.getOrElse { error ->
+                println(
+                    "@@TPUI_CATALOG_SKIP@@ file=${manifest.name} " +
+                        "reason=sram error=${error.message}"
+                )
+                return@mapNotNull null
+            }
+            println("@@TPUI_SRAM_READY@@ file=${sram.name} size=${sram.length()}")
 
             // TPUI profiles address the canonical manifest filename. Most are
             // named after gameid, but returning the actual basename also keeps

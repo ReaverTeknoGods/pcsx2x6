@@ -56,6 +56,7 @@ import com.armsx2.EmuState
 import com.armsx2.FilenameParser
 import com.armsx2.GameInfo
 import com.armsx2.PlayTime
+import com.armsx2.TeknoParrotInputPage
 import com.armsx2.events.TestResult
 import com.armsx2.input.ControllerMappings
 import com.armsx2.input.SoftKeyboard
@@ -1769,11 +1770,7 @@ open class MainActivityRuntime : ComponentActivity() {
             ?: File(File(root, "bridge"), "TeknoParrot_JvsState.page")
 
         return runCatching {
-            page.parentFile?.mkdirs()
-            java.io.RandomAccessFile(page, "rw").use { file ->
-                if (file.length() < 4096L)
-                    file.setLength(4096L)
-            }
+            TeknoParrotInputPage.prepare(page)
             ParcelFileDescriptor.open(page, ParcelFileDescriptor.MODE_READ_WRITE).use { descriptor ->
                 val mapped = NativeApp.setTeknoParrotInputPageFd(descriptor.fd)
                 println(

@@ -140,13 +140,18 @@ class TeknoParrotGameImportActivity : ComponentActivity() {
             val copiedFiles = intArrayOf(0)
             copyTree(sourceData, stagedData, 0, copiedFiles)
 
-            val requiredFiles =
-                requiredNames.values.map { File(stagedData, it) } +
-                    File(stagedData, "sram.bin")
+            val requiredFiles = requiredNames.values.map { File(stagedData, it) }
             val missing = requiredFiles.firstOrNull { !it.isFile || it.length() <= 0L }
             require(missing == null) {
                 "The selected package is incomplete: ${missing?.name ?: "required file"} is missing."
             }
+            // SRAM is writable cabinet state, not dump content. Desktop creates
+            // it automatically; do the same here so users never need to source
+            // or copy another machine's per-game state image.
+            TeknoParrotArcadeStorage.ensureBlankSram(
+                stagedData,
+                values["data.sram"] ?: "sram.bin",
+            )
 
             installAtomically(
                 gameRoot,
